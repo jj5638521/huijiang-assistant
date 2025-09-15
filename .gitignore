@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.TemporaryItems
+*.localized
+__MACOSX/
+
+# 编辑器与工具
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 临时与备份
+*.tmp
+*~
+~$*

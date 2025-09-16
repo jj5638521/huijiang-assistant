@@ -1,0 +1,52 @@
+name: Update rules index
+
+on:
+  push:
+    paths:
+      - 'rules/01_工资模块_latest.md'
+  release:
+    types: [published]
+  workflow_dispatch: {}   # 手动运行按钮
+
+jobs:
+  bump-readme:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 允许工作流提交回仓库
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure UTF-8
+        run: |
+          echo "LANG=C.UTF-8" >> $GITHUB_ENV
+          echo "LC_ALL=C.UTF-8" >> $GITHUB_ENV
+
+      - name: Read version from latest
+        id: v
+        shell: bash
+        run: |
+          # 从 latest 头部抓 "版本 vYYYY-MM-DDR*"（兼容全/半角冒号与空格）
+          ver=$(grep -E -m1 '^版本[ ：:]*v[0-9-]+R[0-9A-Za-z]+' rules/01_工资模块_latest.md \
+                | sed -E 's/.*(v[0-9-]+R[0-9A-Za-z]+).*/\1/')
+          if [ -z "$ver" ]; then
+            echo "❌ 未在 latest 中解析到版本号" >&2
+            exit 1
+          fi
+          echo "ver=$ver" >> $GITHUB_OUTPUT
+
+      - name: Patch rules/README.md
+        shell: bash
+        run: |
+          set -e
+          v='${{ steps.v.outputs.ver }}'
+          readme="rules/README.md"
+          # 1) 更新“当前生效版本”：01_工资模块 → vXXXX
+          sed -i -E "s/(01_工资模块[[:space:]]*→[[:space:]]*)v[0-9-]+R[0-9A-Za-z]+/\\1${v}/" "$readme"
+          # 2) 更新实体链接：./01_工资模块_vXXXX.md
+          sed -i -E "s#\\(\\./01_工资模块_v[0-9-]+R[0-9A-Za-z]+\\.md\\)#(./01_工资模块_${v}.md)#" "$readme"
+
+      - name: Commit changes (if any)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs(rules): bump index to ${{ steps.v.outputs.ver }}"
+          file_pattern: rules/README.md

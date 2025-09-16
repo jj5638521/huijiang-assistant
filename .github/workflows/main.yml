@@ -1,0 +1,77 @@
+name: Auto release on latest
+
+on:
+  push:
+    branches: [main]              # 只在 main 上的改动触发
+    paths: ['rules/01_工资模块_latest.md']
+  workflow_dispatch: {}            # 允许手动触发
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write             # 需要给出写权限（打 tag、发 release）
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 需要完整历史以检测已有 tag
+
+      - name: 解析版本号
+        id: v
+        shell: bash
+        run: |
+          ver=$(grep -E -m1 '^版本[ ：:]*v[0-9-]+R[0-9A-Za-z]+' rules/01_工资模块_latest.md \
+                | sed -E 's/.*(v[0-9-]+R[0-9A-Za-z]+).*/\1/')
+          [ -z "$ver" ] && echo "未解析到版本号" && exit 1
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          echo "解析到版本：$ver"
+
+      - name: 判断 tag 是否已存在
+        id: t
+        shell: bash
+        run: |
+          if git ls-remote --tags origin | grep -q "refs/tags/${{ steps.v.outputs.ver }}$"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # （可选）若没有同名版本文件，则用 latest 复制一份留档
+      - name: 补充版本文件（可选）
+        if: steps.t.outputs.exists == 'false'
+        shell: bash
+        run: |
+          v="${{ steps.v.outputs.ver }}"
+          dst="rules/01_工资模块_${v}.md"
+          if [ ! -f "$dst" ]; then
+            cp rules/01_工资模块_latest.md "$dst"
+            git config user.name "github-actions"
+            git config user.email "actions@github.com"
+            git add "$dst"
+            git commit -m "chore(rules): add ${dst} (auto from latest)"
+            git push
+          fi
+
+      - name: 打 tag
+        if: steps.t.outputs.exists == 'false'
+        shell: bash
+        run: |
+          v="${{ steps.v.outputs.ver }}"
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git tag -a "$v" -m "Auto tag from latest"
+          git push origin "$v"
+
+      - name: 创建 Release
+        if: steps.t.outputs.exists == 'false'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.v.outputs.ver }}
+          name: 工资模块 ${{ steps.v.outputs.ver }}
+          body: |
+            自动发布：同步 latest。
+            规则文件：
+            - rules/01_工资模块_latest.md
+            - rules/01_工资模块_${{ steps.v.outputs.ver }}.md
+          draft: false
+          prerelease: false

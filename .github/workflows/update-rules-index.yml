@@ -6,44 +6,62 @@ on:
       - 'rules/01_工资模块_latest.md'
   release:
     types: [published]
-  workflow_dispatch: {}   # 手动运行按钮
+  workflow_dispatch: {}
 
 jobs:
   bump-readme:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # 允许工作流提交回仓库
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Ensure UTF-8
         run: |
-          echo "LANG=C.UTF-8" >> $GITHUB_ENV
-          echo "LC_ALL=C.UTF-8" >> $GITHUB_ENV
+          echo "LANG=C.UTF-8" >> "$GITHUB_ENV"
+          echo "LC_ALL=C.UTF-8" >> "$GITHUB_ENV"
 
-      - name: Read version from latest
+      # 读取版本（支持 -HFx；只认“版本 vYYYY-MM-DDRn(-HFx)”这一行）
+      - name: Read version from latest（识别可选 -HFx）
         id: v
         shell: bash
         run: |
-          # 从 latest 头部抓 "版本 vYYYY-MM-DDR*"（兼容全/半角冒号与空格）
-          ver=$(grep -E -m1 '^版本[ ：:]*v[0-9-]+R[0-9A-Za-z]+' rules/01_工资模块_latest.md \
-                | sed -E 's/.*(v[0-9-]+R[0-9A-Za-z]+).*/\1/')
-          if [ -z "$ver" ]; then
-            echo "❌ 未在 latest 中解析到版本号" >&2
+          set -euo pipefail
+          f="rules/01_工资模块_latest.md"
+
+          # 允许“版本 v2025-09-17R7”或“版本：v2025-09-17R7-HF2”（含中/英冒号与空格）
+          grep -Eq '^[[:space:]]*版本[[:space:]:：]+v[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?[[:space:]]*$' "$f"
+
+          ver="$(sed -n 's/^[[:space:]]*版本[[:space:]:：]\+v\([0-9-]\+R[0-9]\+\(-HF[0-9]\+\)\?\)[[:space:]]*$/v\1/p' "$f" | head -n1)"
+          if [ -z "${ver:-}" ]; then
+            echo "未能解析版本号（需要形如：版本 v2025-09-17R7 或 版本 v2025-09-17R7-HF2）" >&2
             exit 1
           fi
-          echo "ver=$ver" >> $GITHUB_OUTPUT
 
-      - name: Patch rules/README.md
+          ver_no_v="${ver#v}"                      # 2025-09-17R7[-HFx]
+          entity="01_工资模块_${ver}.md"           # 01_工资模块_v2025-09-17R7[-HFx].md
+
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          echo "ver_no_v=$ver_no_v" >> "$GITHUB_OUTPUT"
+          echo "entity=$entity" >> "$GITHUB_OUTPUT"
+
+      - name: Patch rules/README.md（版本与实体都更新，支持 -HFx）
         shell: bash
         run: |
-          set -e
-          v='${{ steps.v.outputs.ver }}'
+          set -euo pipefail
+          v="${{ steps.v.outputs.ver }}"
+          vnv="${{ steps.v.outputs.ver_no_v }}"
+          entity="${{ steps.v.outputs.entity }}"
           readme="rules/README.md"
-          # 1) 更新“当前生效版本”：01_工资模块 → vXXXX
-          sed -i -E "s/(01_工资模块[[:space:]]*→[[:space:]]*)v[0-9-]+R[0-9A-Za-z]+/\\1${v}/" "$readme"
-          # 2) 更新实体链接：./01_工资模块_vXXXX.md
-          sed -i -E "s#\\(\\./01_工资模块_v[0-9-]+R[0-9A-Za-z]+\\.md\\)#(./01_工资模块_${v}.md)#" "$readme"
+
+          # 1) “当前生效版本”右侧的可视文本：01_工资模块 → 2025-09-17R7[-HFx]  （注意这里不带 v）
+          sed -i -E 's#(01_工资模块[[:space:]]*→[[:space:]]*)[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?#\1'"$vnv"'#' "$readme"
+
+          # 2) 实体链接（方括号里的可见文本）
+          sed -i -E 's#(\[01_工资模块_v)[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?(\.md\])#\1'"$vnv"'\3#' "$readme"
+          # 3) 实体链接（圆括号里的目标地址；兼容 (01_工资模块_*.md) 或 (./01_工资模块_*.md)）
+          sed -i -E 's#\((\.?/)?01_工资模块_v[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?\.md\)#(./'"$entity"')#' "$readme"
 
       - name: Commit changes (if any)
         uses: stefanzweifel/git-auto-commit-action@v5

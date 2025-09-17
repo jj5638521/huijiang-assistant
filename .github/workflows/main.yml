@@ -2,76 +2,66 @@ name: Auto release on latest
 
 on:
   push:
-    branches: [main]              # 只在 main 上的改动触发
-    paths: ['rules/01_工资模块_latest.md']
-  workflow_dispatch: {}            # 允许手动触发
+    paths:
+      - 'rules/01_工资模块_latest.md'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write             # 需要给出写权限（打 tag、发 release）
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0          # 需要完整历史以检测已有 tag
 
-      - name: 解析版本号
+      - name: Ensure UTF-8
+        run: |
+          echo "LANG=C.UTF-8" >> "$GITHUB_ENV"
+          echo "LC_ALL=C.UTF-8" >> "$GITHUB_ENV"
+
+      - name: Parse version from latest（支持 -HFx）
         id: v
         shell: bash
         run: |
-          ver=$(grep -E -m1 '^版本[ ：:]*v[0-9-]+R[0-9A-Za-z]+' rules/01_工资模块_latest.md \
-                | sed -E 's/.*(v[0-9-]+R[0-9A-Za-z]+).*/\1/')
-          [ -z "$ver" ] && echo "未解析到版本号" && exit 1
+          set -euo pipefail
+          L='rules/01_工资模块_latest.md'
+          test -f "$L" || { echo "❌ 缺少 $L"; exit 1; }
+          # 兼容：版本 vYYYY-MM-DDRn 或 版本 vYYYY-MM-DDRn-HF2（全/半角冒号都行）
+          line="$(grep -E -m1 '^[[:space:]]*版本[[:space:]:：]*v[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?[[:space:]]*$' "$L" || true)"
+          [ -n "$line" ] || { echo "❌ 未解析到版本号"; exit 1; }
+          ver="$(sed -E 's/.*(v[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?).*/\1/' <<<"$line")"
           echo "ver=$ver" >> "$GITHUB_OUTPUT"
-          echo "解析到版本：$ver"
+          echo "✅ 版本：$ver"
 
-      - name: 判断 tag 是否已存在
-        id: t
+      - name: Prepare artifact（若无版本化文件则临时拷贝）
+        id: art
         shell: bash
         run: |
-          if git ls-remote --tags origin | grep -q "refs/tags/${{ steps.v.outputs.ver }}$"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          ver='${{ steps.v.outputs.ver }}'
+          src='rules/01_工资模块_latest.md'
+          dst="01_工资模块_${ver}.md"
+          if [ -f "rules/${dst}" ]; then
+            cp "rules/${dst}" "${dst}"
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            cp "${src}" "${dst}"
           fi
+          echo "file=${dst}" >> "$GITHUB_OUTPUT"
 
-      # （可选）若没有同名版本文件，则用 latest 复制一份留档
-      - name: 补充版本文件（可选）
-        if: steps.t.outputs.exists == 'false'
-        shell: bash
-        run: |
-          v="${{ steps.v.outputs.ver }}"
-          dst="rules/01_工资模块_${v}.md"
-          if [ ! -f "$dst" ]; then
-            cp rules/01_工资模块_latest.md "$dst"
-            git config user.name "github-actions"
-            git config user.email "actions@github.com"
-            git add "$dst"
-            git commit -m "chore(rules): add ${dst} (auto from latest)"
-            git push
-          fi
-
-      - name: 打 tag
-        if: steps.t.outputs.exists == 'false'
-        shell: bash
-        run: |
-          v="${{ steps.v.outputs.ver }}"
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git tag -a "$v" -m "Auto tag from latest"
-          git push origin "$v"
-
-      - name: 创建 Release
-        if: steps.t.outputs.exists == 'false'
+      - name: Create or update GitHub Release
         uses: ncipollo/release-action@v1
         with:
+          token: ${{ github.token }}
           tag: ${{ steps.v.outputs.ver }}
-          name: 工资模块 ${{ steps.v.outputs.ver }}
+          name: 01_工资模块 ${{ steps.v.outputs.ver }}
           body: |
-            自动发布：同步 latest。
-            规则文件：
-            - rules/01_工资模块_latest.md
-            - rules/01_工资模块_${{ steps.v.outputs.ver }}.md
+            自动发布：latest 变更触发。
+            - 规则版本：${{ steps.v.outputs.ver }}
+            - 文件：01_工资模块_${{ steps.v.outputs.ver }}.md
+          artifacts: ${{ steps.art.outputs.file }}
+          allowUpdates: true
+          replaceArtifacts: true
+          makeLatest: true
           draft: false
           prerelease: false

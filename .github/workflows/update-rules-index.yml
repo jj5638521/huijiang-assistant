@@ -12,6 +12,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: update-rules-index
+  cancel-in-progress: false
+
 jobs:
   bump-readme:
     runs-on: ubuntu-latest
@@ -21,69 +25,87 @@ jobs:
 
       - name: Ensure UTF-8
         run: |
-          echo "LANG=C.UTF-8" >> $GITHUB_ENV
-          echo "LC_ALL=C.UTF-8" >> $GITHUB_ENV
+          echo "LANG=C.UTF-8" >> "$GITHUB_ENV"
+          echo "LC_ALL=C.UTF-8" >> "$GITHUB_ENV"
 
-      - name: Read version from latest (识别可选 -HFx)
+      - name: Read version from latest（识别可选 -HFx）
         id: v
         shell: bash
         run: |
           set -euo pipefail
           latest="rules/01_工资模块_latest.md"
-          # 兼容：`版本 vYYYY-MM-DDR7` 或 `版本 vYYYY-MM-DDR7-HF2`（全/半角冒号都行）
-          ver=$(grep -E -m1 '^版本[ ：:]*v[0-9-]+R[0-9A-Za-z]+(-HF[0-9]+)?' "$latest" \
-                | sed -E 's/.*(v[0-9-]+R[0-9A-Za-z]+(-HF[0-9]+)?).*/\1/')
-          if [ -z "${ver:-}" ]; then
-            echo "❌ 未在 latest 中解析到版本号" >&2
+          # 兼容：版本 vYYYY-MM-DDR7 或 版本 vYYYY-MM-DDR7-HF2（全/半角冒号与空格）
+          ver_line="$(grep -E -m1 '^[[:space:]]*版本[[:space:]:：]*v[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?[[:space:]]*$' "$latest" || true)"
+          if [ -z "$ver_line" ]; then
+            echo "❌ 未在 latest 中解析到版本号（期望：版本 vYYYY-MM-DDRn[-HFx]）" >&2
             exit 1
           fi
-          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          ver="$(sed -E 's/.*(v[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?).*/\1/' <<<"$ver_line")"
+          disp="${ver#v}"  # README“当前生效版本”显示不带 v
+          echo "ver=$ver"   >> "$GITHUB_OUTPUT"
+          echo "disp=$disp" >> "$GITHUB_OUTPUT"
 
       - name: Patch rules/README.md（版本与实体都更新，支持 -HFx）
         id: patch
         shell: bash
         run: |
           set -euo pipefail
-          v='${{ steps.v.outputs.ver }}'
+          v='${{ steps.v.outputs.ver }}'       # v2025-09-17R7[-HFx]
+          d='${{ steps.v.outputs.disp }}'      # 2025-09-17R7[-HFx]
           readme="rules/README.md"
+          [ -f "$readme" ] || { echo "❌ 缺少 $readme"; exit 1; }
 
-          # 1) “当前生效版本”行：01_工资模块 → vXXXX
-          sed -i -E "s/(01_工资模块[[:space:]]*→[[:space:]]*)v[0-9-]+R[0-9A-Za-z]+(-HF[0-9]+)?/\\1${v}/" "$readme"
+          before_sha="$(sha1sum "$readme" | awk '{print $1}')"
 
-          # 2) 实体链接：./01_工资模块_vXXXX.md
-          sed -i -E "s#\\(\\./01_工资模块_v[0-9-]+R[0-9A-Za-z]+(-HF[0-9]+)?\\.md\\)#(./01_工资模块_${v}.md)#" "$readme"
+          # 1) “当前生效版本”右侧文本：允许旧值带/不带 v，统一替换为不带 v 的显示值
+          sed -i -E 's#(01_工资模块[[:space:]]*→[[:space:]]*)v?[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?#\1'"$d"'#' "$readme"
 
-          # 记录是否有变更
-          if git diff --exit-code -- "$readme" > /dev/null; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
+          # 2) 实体链接（方括号里的可见文本）：[01_工资模块_vYYYY-...(-HFx).md]
+          sed -i -E 's#(\[01_工资模块_v)[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?(\.md\])#\1'"$d"'\3#' "$readme"
+
+          # 3) 实体链接（圆括号里的目标地址）：(./01_工资模块_vYYYY-...(-HFx).md)
+          sed -i -E 's#\((\.?/)?01_工资模块_v[0-9]{4}-[0-9]{2}-[0-9]{2}R[0-9]+(-HF[0-9]+)?\.md\)#(./01_工资模块_'"$v"'.md)#' "$readme"
+
+          after_sha="$(sha1sum "$readme" | awk '{print $1}')"
+          if [ "$before_sha" != "$after_sha" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # 改为走 PR：固定 ASCII 分支名，避免全角/隐藏字符
+      # 通过 PR 更新（兼容受保护分支）；固定 ASCII 分支名，避免隐藏字符
       - name: Create or Update Pull Request
         if: steps.patch.outputs.changed == 'true'
+        id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          branch: chore/bump-rules-index
           base: main
+          branch: chore/bump-rules-index
           title: "docs(rules): bump index to ${{ steps.v.outputs.ver }}"
           commit-message: "docs(rules): bump index to ${{ steps.v.outputs.ver }}"
           body: |
             自动更新规则索引：
-            - 当前生效版本：${{ steps.v.outputs.ver }}
-            - 实体：`01_工资模块_${{ steps.v.outputs.ver }}.md`
-            由工作流触发（push/release/手动）。
-          labels: rules-index, bot
-          signoff: false
+            - 当前生效版本：${{ steps.v.outputs.disp }}
+            - 实体：01_工资模块_${{ steps.v.outputs.ver }}.md
+          add-paths: |
+            rules/README.md
+          labels: docs, automation
           delete-branch: true
+          signoff: false
 
-      # 可选：若仓库已开启“自动合并”，则自动合并该 PR
-      - name: Enable auto-merge (optional)
-        if: steps.patch.outputs.changed == 'true'
+      # 仓库已启用“允许自动合并”时可自动合并该 PR（保留受保护分支规则）
+      - name: Enable auto-merge (squash)
+        if: steps.cpr.outputs.pull-request-number != ''
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          pull-request-number: ${{ steps.create_pull_request.outputs.pull-request-number }}
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
           merge-method: squash
+
+      - name: Summary
+        run: |
+          echo "version: ${{ steps.v.outputs.ver }}"
+          echo "display: ${{ steps.v.outputs.disp }}"
+          echo "readme changed: ${{ steps.patch.outputs.changed }}"
+          echo "pr: #${{ steps.cpr.outputs.pull-request-number || 'n/a' }}"

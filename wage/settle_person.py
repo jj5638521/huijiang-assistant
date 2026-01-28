@@ -12,7 +12,7 @@ from .checks import CheckResult, run_checks
 from .payment_pipe import PaymentResult, compute_payments
 from .render_blocking_report import render_blocking_report
 
-RULE_VERSION = "v2025-11-25R52"
+RULE_VERSION = "v2025-11-25R53"
 VERSION_NOTE = f"计算口径版本 {RULE_VERSION}｜阻断模式：Hard"
 
 DAILY_WAGE_MAP = {
@@ -22,6 +22,10 @@ DAILY_WAGE_MAP = {
     "董祥": Decimal("300"),
     "王怀良": Decimal("230"),
     "袁玉兵": Decimal("300"),
+}
+ROLE_WAGE_MAP = {
+    "组长": Decimal("300"),
+    "组员": Decimal("200"),
 }
 DEFAULT_SINGLE_YES = Decimal("270")
 DEFAULT_SINGLE_NO = Decimal("135")
@@ -78,12 +82,7 @@ def _compute_pricing(
     wage_total = wage_group + wage_single_yes + wage_single_no
 
     meal_total = Decimal("0")
-    meal_total += Decimal("25") * Decimal(group_yes_days)
-    meal_total += Decimal("40") * Decimal(group_no_days)
-
     travel_total = Decimal("0")
-    if project_ended:
-        travel_total = Decimal("0")
 
     paid_total = payment.paid_total
     prepay_total = payment.prepay_total
@@ -187,7 +186,10 @@ def settle_person(
     attendance = compute_attendance(attendance_list, project_name, person_name)
     payment = compute_payments(payment_list, project_name, person_name)
 
-    daily_group = DAILY_WAGE_MAP.get(person_name or "", Decimal("0"))
+    daily_group = DAILY_WAGE_MAP.get(
+        person_name or "",
+        ROLE_WAGE_MAP.get(role or "", Decimal("0")),
+    )
     single_yes = Decimal(str(runtime_overrides.get("single_yes", DEFAULT_SINGLE_YES)))
     single_no = Decimal(str(runtime_overrides.get("single_no", DEFAULT_SINGLE_NO)))
 
@@ -267,13 +269,8 @@ def settle_person(
             f"{_format_decimal(pricing.wage_single_yes + pricing.wage_single_no)}"
         ),
         f"- 工资合计：{_format_decimal(pricing.wage_total)}",
-        (
-            f"- 餐补：25×{group_yes_days}+40×{group_no_days}="
-            f"{_format_decimal(pricing.meal_total)}"
-        ),
-        (
-            f"- 路补：{_format_decimal(pricing.travel_total)}（项目已结束={'是' if project_ended else '否'}）"
-        ),
+        f"- 餐补：{_format_decimal(pricing.meal_total)}（当前口径=0）",
+        f"- 路补：{_format_decimal(pricing.travel_total)}（当前口径=0，项目已结束={'是' if project_ended else '否'}）",
         "3）已付/预支明细：",
     ]
 

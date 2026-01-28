@@ -142,7 +142,7 @@ def _render_summary(
         lines.append("待确认原因汇总：")
         reason_order = [
             "状态缺失",
-            "已通过未支付",
+            "通过但状态缺失",
             "未通过",
             "状态无效",
             "类别待确认",

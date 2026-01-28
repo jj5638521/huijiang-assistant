@@ -68,6 +68,48 @@ def _scan_csv_candidates(data_dir: Path) -> list[CsvCandidate]:
     return candidates
 
 
+def _report_current_dir_overflow(candidates: list[CsvCandidate]) -> None:
+    print("当前目录发现多个CSV：")
+    for candidate in sorted(candidates, key=lambda item: item.path.name):
+        print(f"- {candidate.path.name}")
+    print("当前目录只保留 1(合并) 或 2(分开) 个CSV")
+
+
+def _resolve_input_paths(data_dir: Path) -> tuple[Path, Path] | None:
+    current_dir = data_dir / "当前"
+    if current_dir.exists():
+        candidates = _scan_csv_candidates(current_dir)
+        if not candidates:
+            print("请把本次CSV拖到 数据/当前/（文件名随意）")
+            return None
+        if len(candidates) > 2:
+            _report_current_dir_overflow(candidates)
+            return None
+        selected = _select_input_paths(candidates)
+        if selected is None:
+            if len(candidates) == 1:
+                print("当前目录只有 1 个 CSV，无法判定为合并表，请再放一份")
+            else:
+                _print_candidate_report(candidates)
+            return None
+        return selected
+
+    attendance_path = data_dir / "attendance.csv"
+    payment_path = data_dir / "payment.csv"
+    if attendance_path.exists() and payment_path.exists():
+        return attendance_path, payment_path
+
+    candidates = _scan_csv_candidates(data_dir)
+    selected = _select_input_paths(candidates)
+    if selected is None:
+        if not candidates:
+            print("把 CSV 放到 data/ 目录下（文件名随意）")
+        else:
+            _print_candidate_report(candidates)
+        return None
+    return selected
+
+
 def _select_input_paths(candidates: list[CsvCandidate]) -> tuple[Path, Path] | None:
     combined = [
         candidate
@@ -133,24 +175,15 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     data_dir = repo_root / "data"
     data_dir.mkdir(exist_ok=True)
-    attendance_path = data_dir / "attendance.csv"
-    payment_path = data_dir / "payment.csv"
-
-    if attendance_path.exists() and payment_path.exists():
-        selected = (attendance_path, payment_path)
-    else:
-        candidates = _scan_csv_candidates(data_dir)
-        selected = _select_input_paths(candidates)
-        if selected is None:
-            if not candidates:
-                print("把 CSV 放到 data/ 目录下（文件名随意）")
-            else:
-                _print_candidate_report(candidates)
-            return 0
+    selected = _resolve_input_paths(data_dir)
+    if selected is None:
+        return 0
 
     attendance_rows = _read_csv(selected[0])
     payment_rows = _read_csv(selected[1])
 
+    print(f"出勤表: {selected[0].resolve()}")
+    print(f"报销表: {selected[1].resolve()}")
     result = settle_person(attendance_rows, payment_rows)
     print(result)
     return 0

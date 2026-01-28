@@ -22,8 +22,10 @@
 
 - `python3 -m pytest -q`
 - `python3 -m tools.demo_settle_person`（推荐把本次文件拖到 `数据/当前/`；历史放 `数据/归档/`）
+- `python3 -m tools.demo_settle_project`（项目结算批量出单，CSV 放 `数据/当前/`）
 - 在 `数据/当前/口令.txt`（UTF-8）中填写口令，例如：
   - `工资：王怀宇 组长 项目已结束=是 项目=溧马一溧芜设标-凌云`
+  - `项目结算：项目=溧马一溧芜设标-凌云 项目已结束=是`
 
 ### PR 审查提示（可选但建议）
 

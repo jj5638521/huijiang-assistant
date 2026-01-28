@@ -7,29 +7,43 @@ from typing import Any
 
 
 ROLE_KEYWORDS = ["组长", "组员"]
+FULLWIDTH_SPACE = "\u3000"
 
 
-def _normalize_text(text: str) -> str:
-    cleaned = text.replace("：", ":")
-    cleaned = cleaned.replace("｜", " ")
-    cleaned = cleaned.replace("|", " ")
-    return " ".join(cleaned.split())
+def _normalize_line(text: str) -> str:
+    cleaned = (
+        text.replace("\ufeff", "")
+        .replace("：", ":")
+        .replace("＝", "=")
+        .replace(FULLWIDTH_SPACE, " ")
+        .replace("｜", " ")
+        .replace("|", " ")
+    )
+    return " ".join(cleaned.strip().split())
 
 
-def _extract_project_ended(text: str) -> bool | None:
-    match = re.search(r"项目已结束\s*=\s*([是否])", text)
-    if not match:
-        match = re.search(r"项目结束\s*=\s*([是否])", text)
-    if not match:
-        return None
-    return match.group(1) == "是"
+def _parse_bool(value: str) -> bool | None:
+    normalized = value.strip().lower()
+    if normalized in {"是", "true", "1"}:
+        return True
+    if normalized in {"否", "false", "0"}:
+        return False
+    return None
 
 
-def _extract_project_name(text: str) -> str | None:
-    match = re.search(r"项目\s*=\s*([^\s]+)", text)
-    if not match:
-        return None
-    return match.group(1).strip()
+def _extract_project_header(line: str) -> tuple[str | None, str]:
+    normalized = _normalize_line(line)
+    if not normalized.startswith("项目结算"):
+        return None, ""
+    remainder = normalized[len("项目结算") :].lstrip(":").strip()
+    if not remainder:
+        return None, ""
+    tokens = remainder.split()
+    if tokens and all(sep not in tokens[0] for sep in (":", "=")):
+        project_name = tokens[0]
+        rest = " ".join(tokens[1:]).strip()
+        return project_name, rest
+    return None, remainder
 
 
 def _extract_role(text: str) -> str | None:
@@ -58,10 +72,11 @@ def _extract_person_name(text: str) -> str | None:
 
 
 def _split_kv(text: str) -> tuple[str | None, str | None]:
-    normalized = text.replace("：", ":").replace("=", ":")
-    if ":" not in normalized:
+    normalized = _normalize_line(text)
+    match = re.search(r"[:=]", normalized)
+    if not match:
         return None, None
-    name, value = normalized.split(":", 1)
+    name, value = normalized.split(match.group(0), 1)
     name = name.strip()
     value = value.strip()
     if not name or not value:
@@ -89,7 +104,7 @@ def _parse_fixed_daily_rate(value: str) -> Decimal | None:
 
 
 def _detect_mode(first_line: str) -> str | None:
-    normalized = _normalize_text(first_line)
+    normalized = _normalize_line(first_line)
     if normalized.startswith("工资:") or normalized.startswith("工资"):
         return "single"
     if normalized.startswith("项目结算:") or normalized.startswith("项目结算"):
@@ -97,12 +112,17 @@ def _detect_mode(first_line: str) -> str | None:
     return None
 
 
+def _extract_kv_pairs(line: str) -> list[tuple[str, str]]:
+    normalized = _normalize_line(line)
+    return re.findall(r"([^\s:=]+)\s*[:=]\s*([^\s]+)", normalized)
+
+
 def _parse_blocks(lines: list[str]) -> tuple[dict[str, str], dict[str, Decimal]]:
     role_overrides: dict[str, str] = {}
     fixed_daily_rates: dict[str, Decimal] = {}
     mode: str | None = None
     for line in lines:
-        stripped = line.strip()
+        stripped = _normalize_line(line)
         if not stripped:
             continue
         if stripped.startswith("角色"):
@@ -128,24 +148,82 @@ def _parse_blocks(lines: list[str]) -> tuple[dict[str, str], dict[str, Decimal]]
     return role_overrides, fixed_daily_rates
 
 
+def _apply_kv_mapping(
+    result: dict[str, Any],
+    key: str,
+    value: str,
+) -> None:
+    if key in {"项目已结束", "项目结束", "项目是否结束"}:
+        parsed = _parse_bool(value)
+        if parsed is not None:
+            result["project_ended"] = parsed
+        return
+    if key == "项目":
+        result["project_name"] = value.strip()
+        return
+    if key == "路补口令":
+        runtime_overrides = result.setdefault("runtime_overrides", {})
+        runtime_overrides["road_passphrase"] = value.strip()
+
+
 def parse_command(text: str) -> dict[str, Any]:
     """Parse wage settlement command text.
 
     Returns a dict with person_name, role, project_ended, project_name,
     runtime_overrides.
     """
-    lines = [line for line in text.splitlines() if line.strip()]
+    raw_lines = text.splitlines()
+    lines = [_normalize_line(line) for line in raw_lines if _normalize_line(line)]
     first_line = lines[0] if lines else ""
-    normalized = _normalize_text(first_line)
-    role_overrides, fixed_daily_rates = _parse_blocks(lines[1:])
     mode = _detect_mode(first_line)
-    return {
+    role_overrides: dict[str, str] = {}
+    fixed_daily_rates: dict[str, Decimal] = {}
+    result: dict[str, Any] = {
         "mode": mode,
-        "person_name": _extract_person_name(normalized),
-        "role": _extract_role(normalized),
-        "project_ended": _extract_project_ended(normalized),
-        "project_name": _extract_project_name(normalized),
+        "person_name": _extract_person_name(first_line),
+        "role": _extract_role(first_line),
+        "project_ended": None,
+        "project_name": None,
         "role_overrides": role_overrides,
         "fixed_daily_rates": fixed_daily_rates,
         "runtime_overrides": {},
     }
+    if mode == "project" and first_line:
+        project_name, remainder = _extract_project_header(first_line)
+        if project_name:
+            result["project_name"] = project_name
+        if remainder:
+            for key, value in _extract_kv_pairs(remainder):
+                _apply_kv_mapping(result, key, value)
+    if first_line:
+        for key, value in _extract_kv_pairs(first_line):
+            _apply_kv_mapping(result, key, value)
+
+    block_mode: str | None = None
+    for line in lines[1:]:
+        if line.startswith("角色"):
+            block_mode = "role"
+            continue
+        if line.startswith("固定日薪"):
+            block_mode = "fixed"
+            continue
+        if block_mode == "role":
+            name, value = _split_kv(line)
+            if not name or not value:
+                continue
+            role = _normalize_role(value)
+            if role:
+                role_overrides[name] = role
+            continue
+        if block_mode == "fixed":
+            name, value = _split_kv(line)
+            if not name or not value:
+                continue
+            rate = _parse_fixed_daily_rate(value)
+            if rate is not None:
+                fixed_daily_rates[name] = rate
+            continue
+        for key, value in _extract_kv_pairs(line):
+            _apply_kv_mapping(result, key, value)
+
+    return result

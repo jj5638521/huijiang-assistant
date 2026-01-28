@@ -129,24 +129,79 @@ def _print_candidate_report(candidates: list[CsvCandidate]) -> None:
         )
 
 
-def main() -> int:
-    repo_root = Path(__file__).resolve().parent.parent
-    data_dir = repo_root / "data"
-    data_dir.mkdir(exist_ok=True)
+def _print_selected_paths(attendance_path: Path, payment_path: Path) -> None:
+    print(f"出勤表: {attendance_path}")
+    print(f"报销表: {payment_path}")
+
+
+def _print_current_csv_list(candidates: list[CsvCandidate]) -> None:
+    print("当前目录 CSV 清单：")
+    for candidate in sorted(candidates, key=lambda item: item.path.name):
+        print(f"- {candidate.path.name}")
+
+
+def _select_inputs_from_current(current_dir: Path) -> tuple[Path, Path] | None:
+    candidates = _scan_csv_candidates(current_dir)
+    candidate_count = len(candidates)
+    if candidate_count == 0:
+        print("请把本次CSV拖到 数据/当前/（文件名随意）")
+        return None
+    if candidate_count == 1:
+        selected = _select_input_paths(candidates)
+        if selected is None:
+            print("当前目录仅有 1 个 CSV，未识别为合并表，请再放一份。")
+            return None
+        _print_selected_paths(*selected)
+        return selected
+    if candidate_count == 2:
+        selected = _select_input_paths(candidates)
+        if selected is None:
+            _print_candidate_report(candidates)
+            return None
+        _print_selected_paths(*selected)
+        return selected
+
+    _print_current_csv_list(candidates)
+    print("当前目录只保留 1(合并) 或 2(分开) 个CSV")
+    return None
+
+
+def _select_inputs_from_root(data_dir: Path) -> tuple[Path, Path] | None:
     attendance_path = data_dir / "attendance.csv"
     payment_path = data_dir / "payment.csv"
 
     if attendance_path.exists() and payment_path.exists():
         selected = (attendance_path, payment_path)
-    else:
-        candidates = _scan_csv_candidates(data_dir)
-        selected = _select_input_paths(candidates)
-        if selected is None:
-            if not candidates:
-                print("把 CSV 放到 data/ 目录下（文件名随意）")
-            else:
-                _print_candidate_report(candidates)
-            return 0
+        _print_selected_paths(*selected)
+        return selected
+
+    candidates = _scan_csv_candidates(data_dir)
+    selected = _select_input_paths(candidates)
+    if selected is None:
+        if not candidates:
+            print("把 CSV 放到 data/ 目录下（文件名随意）")
+        else:
+            _print_candidate_report(candidates)
+        return None
+
+    _print_selected_paths(*selected)
+    return selected
+
+
+def _select_inputs(repo_root: Path) -> tuple[Path, Path] | None:
+    data_dir = repo_root / "data"
+    data_dir.mkdir(exist_ok=True)
+    current_dir = data_dir / "当前"
+    if current_dir.is_dir():
+        return _select_inputs_from_current(current_dir)
+    return _select_inputs_from_root(data_dir)
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parent.parent
+    selected = _select_inputs(repo_root)
+    if selected is None:
+        return 0
 
     attendance_rows = _read_csv(selected[0])
     payment_rows = _read_csv(selected[1])

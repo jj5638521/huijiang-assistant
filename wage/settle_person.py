@@ -12,7 +12,7 @@ from .checks import CheckResult, run_checks
 from .payment_pipe import PaymentResult, compute_payments
 from .render_blocking_report import render_blocking_report
 
-RULE_VERSION = "v2025-11-25R53"
+RULE_VERSION = "v2025-11-25R54"
 VERSION_NOTE = f"计算口径版本 {RULE_VERSION}｜阻断模式：Hard"
 
 DAILY_WAGE_MAP = {
@@ -139,7 +139,7 @@ def _collect_invalid_items(attendance: AttendanceResult, payment: PaymentResult)
     if attendance.project_mismatches or payment.project_mismatches:
         items.append("项目字段不匹配")
     if payment.invalid_amounts:
-        items.append("支付表金额格式异常")
+        items.append(f"支付表金额格式异常: {'; '.join(payment.invalid_amounts)}")
     if payment.invalid_status_items:
         items.append("支付表存在无效状态")
     if payment.voucher_duplicates:
@@ -158,7 +158,7 @@ def _collect_suggestions(attendance: AttendanceResult, payment: PaymentResult) -
     if attendance.invalid_dates:
         suggestions.append("统一日期格式为 YYYY-MM-DD")
     if payment.invalid_amounts:
-        suggestions.append("金额请填写纯数字，不含文字")
+        suggestions.append("金额请填写数字金额，可包含￥/元/逗号但勿含文字")
     if payment.invalid_status_items:
         suggestions.append("报销状态需在白名单内（如已支付/已报销/审核通过）")
     if payment.voucher_duplicates or payment.empty_voucher_duplicates:

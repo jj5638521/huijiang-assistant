@@ -21,3 +21,11 @@ __MACOSX/
 *.tmp
 *~
 ~$*
+
+# 数据文件
+/data/attendance.csv
+/data/payment.csv
+
+# Python
+__pycache__/
+*.pyc

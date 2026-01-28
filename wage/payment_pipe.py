@@ -6,13 +6,19 @@ from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping
 
 DATE_HEADERS = ["报销日期", "支付日期", "打款日期", "日期"]
-AMOUNT_HEADERS = ["报销金额", "金额", "支付金额"]
-STATUS_HEADERS = ["报销状态", "状态"]
-TYPE_HEADERS = ["报销类型", "费用类型", "类别", "类型"]
+AMOUNT_HEADERS = ["报销金额", "金额", "支付金额", "实付金额"]
+STATUS_HEADERS = ["报销状态", "状态", "付款状态"]
+TYPE_HEADERS = ["报销类型", "费用类型", "类别", "类型", "科目"]
 NAME_HEADERS = ["报销人员", "姓名", "收款人", "人员"]
 PROJECT_HEADERS = ["项目", "项目名称"]
-VOUCHER_HEADERS = ["上传凭证", "凭证号", "凭证"]
-REMARK_HEADERS = ["备注", "说明", "报销备注"]
+VOUCHER_HEADERS = ["上传凭证", "凭证号", "凭证", "票据号", "流水号", "订单号"]
+REMARK_HEADERS = ["备注", "说明", "报销备注", "用途"]
+
+CANDIDATE_AMOUNT_HEADERS = ["金额", "报销金额", "支付金额", "实付金额"]
+CANDIDATE_CATEGORY_HEADERS = ["报销类型", "费用类型", "类型", "类别", "科目"]
+CANDIDATE_STATUS_HEADERS = ["报销状态", "状态", "付款状态"]
+CANDIDATE_VOUCHER_HEADERS = ["凭证号", "上传凭证", "票据号", "流水号", "订单号"]
+CANDIDATE_REMARK_HEADERS = ["备注", "用途", "说明"]
 
 STATUS_WHITELIST = {
     "已支付",
@@ -49,6 +55,7 @@ class PaymentResult:
     invalid_status_items: list[PaymentItem]
     missing_fields: list[str]
     invalid_amounts: list[str]
+    missing_amount_candidates: list[str]
     project_mismatches: list[str]
     voucher_duplicates: list[str]
     empty_voucher_duplicates: list[str]
@@ -69,9 +76,10 @@ def _find_header(headers: set[str], candidates: list[str]) -> str | None:
     return None
 
 
-def _parse_amount(value: str) -> Decimal | None:
+def _clean_amount_text(value: str) -> str:
     cleaned = (
-        value.replace(",", "")
+        (value or "")
+        .replace(",", "")
         .replace("¥", "")
         .replace("￥", "")
         .replace("元", "")
@@ -79,12 +87,33 @@ def _parse_amount(value: str) -> Decimal | None:
         .replace("\u00a0", "")
         .strip()
     )
+    return cleaned
+
+
+def _parse_amount(value: str) -> tuple[Decimal | None, bool]:
+    cleaned = _clean_amount_text(value)
     if not cleaned:
-        return None
+        return None, False
     try:
-        return Decimal(cleaned)
+        return Decimal(cleaned), False
     except InvalidOperation:
-        return None
+        return None, True
+
+
+def is_payment_candidate(row: Mapping[str, str]) -> bool:
+    for header in CANDIDATE_AMOUNT_HEADERS:
+        if _clean_amount_text(row.get(header, "")):
+            return True
+    for header_group in (
+        CANDIDATE_CATEGORY_HEADERS,
+        CANDIDATE_STATUS_HEADERS,
+        CANDIDATE_VOUCHER_HEADERS,
+        CANDIDATE_REMARK_HEADERS,
+    ):
+        for header in header_group:
+            if row.get(header, "").strip():
+                return True
+    return False
 
 
 def _normalize_date(value: str) -> str:
@@ -132,6 +161,7 @@ def compute_payments(
             missing_fields.append(label)
 
     invalid_amounts: list[str] = []
+    missing_amount_candidates: list[str] = []
     project_mismatches: list[str] = []
     voucher_seen: set[tuple[str, str, Decimal]] = set()
     voucher_duplicates: list[str] = []
@@ -145,6 +175,8 @@ def compute_payments(
     invalid_status_items: list[PaymentItem] = []
 
     for index, row in enumerate(rows, start=1):
+        if not is_payment_candidate(row):
+            continue
         if None in (date_key, amount_key, status_key, type_key, name_key):
             continue
         date_value = _normalize_date(row.get(date_key, ""))
@@ -156,22 +188,14 @@ def compute_payments(
         voucher_value = row.get(voucher_key, "").strip() if voucher_key else ""
         remark_value = row.get(remark_key, "").strip() if remark_key else ""
 
-        suspected_payment = any(
-            value
-            for value in (
-                amount_raw.strip(),
-                status_value,
-                type_value,
-                voucher_value,
-                remark_value,
-            )
-        )
-        if not suspected_payment:
-            continue
-
-        amount = _parse_amount(amount_raw)
+        amount, invalid_amount = _parse_amount(amount_raw)
         if amount is None:
-            invalid_amounts.append(f"第{index}行 金额='{amount_raw}'")
+            if invalid_amount:
+                invalid_amounts.append(f"第{index}行 金额='{amount_raw}'")
+            else:
+                missing_amount_candidates.append(
+                    f"第{index}行 疑似支付行但金额缺失: {amount_key}='{amount_raw}'"
+                )
             continue
 
         if target_person and name_value and name_value != target_person:
@@ -235,6 +259,7 @@ def compute_payments(
         invalid_status_items=invalid_status_items,
         missing_fields=missing_fields,
         invalid_amounts=invalid_amounts,
+        missing_amount_candidates=missing_amount_candidates,
         project_mismatches=project_mismatches,
         voucher_duplicates=voucher_duplicates,
         empty_voucher_duplicates=empty_voucher_duplicates,

@@ -3,3 +3,5 @@ verbose=0
 show_notes=1
 show_checks=1
 show_audit=1
+show_logs_in_compact=0
+show_logs_in_detail=1

@@ -36,6 +36,7 @@ STATUS_WHITELIST = {
 
 @dataclass(frozen=True)
 class PaymentItem:
+    line_no: int
     date: str
     name: str
     project: str
@@ -43,6 +44,7 @@ class PaymentItem:
     category: str
     status: str
     voucher: str
+    remark: str
     raw_type: str
 
 
@@ -209,6 +211,7 @@ def compute_payments(
 
         category = _categorize(type_value)
         item = PaymentItem(
+            line_no=index,
             date=date_value,
             name=name_value,
             project=project_value,
@@ -216,6 +219,7 @@ def compute_payments(
             category=category,
             status=status_value,
             voucher=voucher_value,
+            remark=remark_value,
             raw_type=type_value,
         )
 

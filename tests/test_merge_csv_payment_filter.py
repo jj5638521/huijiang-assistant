@@ -74,4 +74,5 @@ def test_merge_csv_filters_attendance_rows_from_payment_checks() -> None:
     assert "【阻断｜工资结算】" not in output
     assert "已付合计：1500" in output
     assert "待确认汇总" not in output
-    assert "疑似支付行但金额缺失" not in output
+    assert "待确认清单" in output
+    assert "金额缺失候选：第4行 疑似支付行但金额缺失" in output

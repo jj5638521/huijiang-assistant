@@ -126,7 +126,10 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     single_detail = "OK" if single_required_ok else "缺少车辆字段"
     checks.append(_check("M", "单防撞必要字段满足", single_required_ok, single_detail))
 
-    pending_detail = f"待确认{len(payment.pending_items)}条"
+    pending_total = len(payment.pending_items) + len(payment.missing_amount_candidates)
+    pending_detail = f"待确认{pending_total}条"
+    if payment.missing_amount_candidates:
+        pending_detail += f"(金额缺失{len(payment.missing_amount_candidates)}条)"
     checks.append(_check("P", "待确认条数提示", True, pending_detail, "soft"))
 
     version_note = context.get("version_note")

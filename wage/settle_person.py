@@ -12,7 +12,7 @@ from .checks import CheckResult, run_checks
 from .payment_pipe import PaymentResult, compute_payments
 from .render_blocking_report import render_blocking_report
 
-RULE_VERSION = "v2025-11-25R54"
+RULE_VERSION = "v2025-11-25R55"
 VERSION_NOTE = f"计算口径版本 {RULE_VERSION}｜阻断模式：Hard"
 
 DAILY_WAGE_MAP = {
@@ -279,7 +279,12 @@ def settle_person(
     detail_lines.append(
         f"已付合计：{_format_decimal(pricing.paid_total)}｜预支合计：{_format_decimal(pricing.prepay_total)}"
     )
-    detail_lines.append(f"待确认条数：{len(payment.pending_items)}")
+    pending_total = len(payment.pending_items) + len(payment.missing_amount_candidates)
+    detail_lines.append(f"待确认条数：{pending_total}")
+    if payment.missing_amount_candidates:
+        detail_lines.append("待确认明细（疑似支付行但金额缺失）：")
+        for evidence in payment.missing_amount_candidates:
+            detail_lines.append(f"- {evidence}")
     detail_lines.append(
         "4）应付：工资 + 餐补 + 路补 - 已付 - 预支"
         f" = {_format_decimal(pricing.payable)}"

@@ -42,7 +42,7 @@ def test_settle_person_outputs_two_segments() -> None:
 
     assert "【详细版（给杰对账）】" in output
     assert "【压缩版（发员工）】" in output
-    assert "计算口径版本 v2025-11-25R54｜阻断模式：Hard" in output
+    assert "计算口径版本 v2025-11-25R55｜阻断模式：Hard" in output
 
 
 def test_settle_person_blocking_report() -> None:

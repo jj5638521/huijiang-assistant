@@ -18,6 +18,7 @@ def render_blocking_report(
     invalid_items: list[str],
     suggestions: list[str],
     include_hash: bool,
+    include_audit: bool,
     output_hash_placeholder: str,
 ) -> str:
     lines = ["【阻断｜工资结算】"]
@@ -40,10 +41,11 @@ def render_blocking_report(
         lines.append("修复建议:")
         for item in suggestions:
             lines.append(f"- {item}")
-    lines.append("审计留痕:")
-    lines.append(f"- run_id: {run_id}")
-    lines.append(f"- 规则版本: {version_note}")
-    if include_hash:
-        lines.append(f"- input_hash: {input_hash}")
-        lines.append(f"- output_hash: {output_hash_placeholder}")
+    if include_audit:
+        lines.append("审计留痕:")
+        lines.append(f"- run_id: {run_id}")
+        lines.append(f"- 规则版本: {version_note}")
+        if include_hash:
+            lines.append(f"- input_hash: {input_hash}")
+            lines.append(f"- output_hash: {output_hash_placeholder}")
     return "\n".join(lines)

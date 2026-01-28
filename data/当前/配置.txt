@@ -1,0 +1,5 @@
+# 运行开关（0=关闭，1=开启）
+verbose=0
+show_notes=1
+show_checks=1
+show_audit=1

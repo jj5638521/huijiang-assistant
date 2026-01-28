@@ -85,7 +85,8 @@ def test_settle_person_outputs_two_segments() -> None:
     assert (
         "应付：工资570 + 餐补65 + 路补0 - 已付300 - 预支0 = 335" in compressed
     )
-    assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", output)
+    assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", detailed)
+    assert "日志：logs/" not in compressed
 
 
 def test_settle_person_blocking_report() -> None:
@@ -224,3 +225,19 @@ def test_settle_person_can_hide_audit_sections() -> None:
     assert "7）校核摘要" not in output
     assert "8）审计留痕" not in output
     assert "日志：logs/" not in output
+
+
+def test_settle_person_compact_can_show_logs_when_enabled() -> None:
+    output = settle_person(
+        _attendance_rows(),
+        _payment_rows(),
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={"show_logs_in_compact": 1},
+    )
+
+    detailed, compressed = output.split("\n\n")
+    assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", detailed)
+    assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", compressed)

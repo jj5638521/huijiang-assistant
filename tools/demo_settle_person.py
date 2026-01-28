@@ -211,7 +211,10 @@ def _read_runtime_overrides(config_path: Path) -> dict[str, int]:
         if not stripped or stripped.startswith("#"):
             continue
         match = re.search(
-            r"\b(verbose|show_notes|show_checks|show_audit)\s*[:=]\s*(\d+)\b",
+            r"\b("
+            r"verbose|show_notes|show_checks|show_audit|"
+            r"show_logs_in_compact|show_logs_in_detail"
+            r")\s*[:=]\s*(\d+)\b",
             stripped,
         )
         if match:

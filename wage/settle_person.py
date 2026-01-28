@@ -294,6 +294,8 @@ def settle_person(
     show_notes = int(runtime_overrides.get("show_notes", 1))
     show_checks = int(runtime_overrides.get("show_checks", 1))
     show_audit = int(runtime_overrides.get("show_audit", 1))
+    show_logs_in_compact = int(runtime_overrides.get("show_logs_in_compact", 0))
+    show_logs_in_detail = int(runtime_overrides.get("show_logs_in_detail", 1))
     daily_group = DAILY_WAGE_MAP.get(
         person_name or "",
         ROLE_WAGE_MAP.get(role or "", Decimal("0")),
@@ -354,7 +356,7 @@ def settle_person(
             output_hash_placeholder=OUTPUT_HASH_PLACEHOLDER,
         )
         output_text = report
-        if not verbose and show_audit:
+        if not verbose and show_audit and show_logs_in_detail:
             output_text = f"{output_text}\n日志：logs/{log_filename}"
         output_hash_source = (
             output_text.replace(
@@ -507,6 +509,8 @@ def settle_person(
         if verbose:
             detail_lines.append(f"- input_hash: {input_hash}")
             detail_lines.append(f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}")
+    if not verbose and show_audit and show_logs_in_detail:
+        detail_lines.append(f"日志：logs/{log_filename}")
     compressed_lines = ["【压缩版（发员工）】"]
     compressed_lines.append(
         f"工资：{_format_decimal(daily_group)}×{group_yes_days}="
@@ -544,12 +548,12 @@ def settle_person(
             indent="    ",
         )
     )
+    if not verbose and show_audit and show_logs_in_compact:
+        compressed_lines.append(f"日志：logs/{log_filename}")
 
     detailed = "\n".join(detail_lines)
     compressed = "\n".join(compressed_lines)
     output_text = "\n\n".join([detailed, compressed])
-    if not verbose and show_audit:
-        output_text = f"{output_text}\n日志：logs/{log_filename}"
     output_hash_source = (
         output_text.replace(
             f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}", ""

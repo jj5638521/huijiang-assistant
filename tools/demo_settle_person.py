@@ -202,6 +202,20 @@ def _read_command_file(command_path: Path) -> str | None:
     return command_path.read_text(encoding="utf-8").strip()
 
 
+def _read_runtime_overrides(config_path: Path) -> dict[str, int]:
+    if not config_path.exists():
+        return {}
+    overrides: dict[str, int] = {}
+    for line in config_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = re.search(r"\bverbose\s*[:=]\s*(\d+)\b", stripped)
+        if match:
+            overrides["verbose"] = int(match.group(1))
+    return overrides
+
+
 def _derive_project_name(path: Path) -> str:
     name = path.stem
     name = re.sub(r"(\s*\(\d+\)|\s*（\d+）)$", "", name)
@@ -234,6 +248,8 @@ def main() -> int:
         command["project_name"] = _derive_project_name(selected[0])
 
     runtime_overrides = dict(command.get("runtime_overrides") or {})
+    config_path = data_dir / "当前" / "配置.txt"
+    runtime_overrides.update(_read_runtime_overrides(config_path))
     runtime_overrides["attendance_source"] = selected[0].name
     runtime_overrides["payment_source"] = selected[1].name
 

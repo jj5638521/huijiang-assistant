@@ -72,10 +72,12 @@ def test_settle_person_outputs_two_segments() -> None:
     assert "【压缩版（发员工）】" in output
     assert f"计算口径版本 {version}｜阻断模式：Hard" in output
     assert f"- 规则版本: 计算口径版本 {version}｜阻断模式：Hard" in output
+    assert "input_hash" not in output
     assert "待确认明细" not in output
     detailed, compressed = output.split("\n\n")
     assert "日期（模式→出勤）" in compressed
     assert "2025-11：" in compressed
+    assert "日志：logs/" in output
 
 
 def test_settle_person_blocking_report() -> None:
@@ -131,3 +133,44 @@ def test_settle_person_no_road_allowance_when_missing() -> None:
     )
 
     assert "路补：0" in output
+
+
+def test_settle_person_default_suppresses_cleaning_logs() -> None:
+    attendance_rows = [
+        {"日期": "2025/11/01", "姓名": "王怀宇、张三", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025/11/02", "姓名": "王怀宇", "是否施工": "否", "车辆": "防撞车"},
+    ]
+    output = settle_person(
+        attendance_rows,
+        _payment_rows(),
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+
+    assert "姓名拆分" not in output
+    assert "日期格式标准化" not in output
+    assert "input_hash" not in output
+
+
+def test_settle_person_verbose_includes_audit_and_cleaning_logs() -> None:
+    attendance_rows = [
+        {"日期": "2025/11/01", "姓名": "王怀宇、张三", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025/11/02", "姓名": "王怀宇", "是否施工": "否", "车辆": "防撞车"},
+    ]
+    output = settle_person(
+        attendance_rows,
+        _payment_rows(),
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={"verbose": 1},
+    )
+
+    assert "姓名拆分" in output
+    assert "日期格式标准化" in output
+    assert "input_hash" in output
+    assert "output_hash" in output

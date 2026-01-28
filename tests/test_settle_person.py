@@ -226,7 +226,7 @@ def test_settle_person_result_passed_moves_to_pending() -> None:
 
     assert not output.startswith("【阻断｜工资结算】")
     assert "已付合计：0｜预支合计：0" in output
-    assert "待确认汇总：已通过未支付1条" in output
+    assert "待确认汇总：通过但状态缺失1条" in output
     assert "待确认清单" not in output
 
 

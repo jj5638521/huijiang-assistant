@@ -440,7 +440,7 @@ def settle_person(
     if payment.missing_status_items:
         pending_reasons["状态缺失"] = len(payment.missing_status_items)
     if payment.approved_result_items:
-        pending_reasons["已通过未支付"] = len(payment.approved_result_items)
+        pending_reasons["通过但状态缺失"] = len(payment.approved_result_items)
     if payment.rejected_result_items:
         pending_reasons["未通过"] = len(payment.rejected_result_items)
     if payment.invalid_status_items:

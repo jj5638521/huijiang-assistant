@@ -18,6 +18,7 @@ NAME_HEADERS = [
 WORK_HEADERS = ["是否施工", "出勤", "施工", "今天是否施工", "是否施工?", "是否施工？"]
 VEHICLE_HEADERS = ["车辆", "车辆信息", "车牌"]
 PROJECT_HEADERS = ["项目", "项目名称"]
+ROLE_HEADERS = ["角色", "职务", "岗位"]
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class AttendanceResult:
     has_vehicle_field: bool
     fangzhuang_hits: list[str]
     auto_corrections: list[str]
+    role_by_person: dict[str, str]
 
 
 def _find_header(headers: set[str], candidates: list[str]) -> str | None:
@@ -68,6 +70,17 @@ def _parse_date(value: str) -> tuple[str | None, str | None]:
             return result, raw
         return result, None
     return None, raw
+
+
+def _normalize_role(value: str) -> str | None:
+    text = value.strip()
+    if not text:
+        return None
+    if "组长" in text:
+        return "组长"
+    if "组员" in text:
+        return "组员"
+    return None
 
 
 def _is_work(value: str) -> bool:
@@ -100,6 +113,7 @@ def compute_attendance(
                 break
     vehicle_key = _find_header(headers, VEHICLE_HEADERS)
     project_key = _find_header(headers, PROJECT_HEADERS)
+    role_key = _find_header(headers, ROLE_HEADERS)
 
     missing_fields = []
     for key, label in (
@@ -116,6 +130,7 @@ def compute_attendance(
     normalization_logs: list[str] = []
     auto_corrections: list[str] = []
     fangzhuang_hits: list[str] = []
+    role_by_person: dict[str, str] = {}
 
     person_day_status: dict[tuple[str, str], bool] = {}
     day_people_working: dict[str, set[str]] = {}
@@ -145,11 +160,25 @@ def compute_attendance(
         work_value = row.get(work_key, "")
         is_work = _is_work(work_value)
         vehicle_value = row.get(vehicle_key, "").strip() if vehicle_key else ""
+        role_value = row.get(role_key, "").strip() if role_key else ""
+        normalized_role = _normalize_role(role_value)
         if vehicle_value and "防撞" in vehicle_value:
             for name in name_list:
                 fangzhuang_hits.append(f"{name}@{parsed_date}:{vehicle_value}")
         raw_project = row.get(project_key, "").strip() if project_key else ""
         for name in name_list:
+            if normalized_role:
+                existing_role = role_by_person.get(name)
+                if existing_role and existing_role != normalized_role:
+                    selected_role = (
+                        "组长" if "组长" in {existing_role, normalized_role} else existing_role
+                    )
+                    role_by_person[name] = selected_role
+                    auto_corrections.append(
+                        f"角色冲突: {name} {existing_role}->{selected_role} (组长优先)"
+                    )
+                else:
+                    role_by_person[name] = normalized_role
             if project_name and raw_project and raw_project != project_name:
                 project_mismatches.append(f"{name}@{parsed_date}: {raw_project}")
 
@@ -229,4 +258,28 @@ def compute_attendance(
         has_vehicle_field=vehicle_key is not None,
         fangzhuang_hits=fangzhuang_hits,
         auto_corrections=auto_corrections,
+        role_by_person=role_by_person,
     )
+
+
+def collect_attendance_people(
+    attendance_rows: Iterable[Mapping[str, str]],
+    project_name: str | None,
+) -> set[str]:
+    rows = list(attendance_rows)
+    headers = {key.strip() for row in rows for key in row.keys()}
+    name_key = _find_header(headers, NAME_HEADERS)
+    project_key = _find_header(headers, PROJECT_HEADERS)
+    if name_key is None:
+        return set()
+    people: set[str] = set()
+    for row in rows:
+        name_value = row.get(name_key, "").strip()
+        if not name_value:
+            continue
+        raw_project = row.get(project_key, "").strip() if project_key else ""
+        if project_name and raw_project and raw_project != project_name:
+            continue
+        for name in _split_names(name_value):
+            people.add(name)
+    return people

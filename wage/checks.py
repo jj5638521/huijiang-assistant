@@ -68,6 +68,17 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
             "OK" if project_ended_ok else "缺少项目已结束=是/否",
         )
     )
+    require_project_ended = context.get("require_project_ended")
+    if require_project_ended:
+        require_ok = project_ended is True
+        checks.append(
+            _check(
+                "L2",
+                "项目已结束=是",
+                require_ok,
+                "OK" if require_ok else "项目未结束",
+            )
+        )
 
     voucher_ok = not payment.voucher_duplicates and not payment.empty_voucher_duplicates
     voucher_detail = "OK"

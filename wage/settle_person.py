@@ -296,10 +296,14 @@ def settle_person(
     show_audit = int(runtime_overrides.get("show_audit", 1))
     show_logs_in_compact = int(runtime_overrides.get("show_logs_in_compact", 0))
     show_logs_in_detail = int(runtime_overrides.get("show_logs_in_detail", 1))
-    daily_group = DAILY_WAGE_MAP.get(
-        person_name or "",
-        ROLE_WAGE_MAP.get(role or "", Decimal("0")),
-    )
+    daily_group_override = runtime_overrides.get("daily_group")
+    if daily_group_override is not None:
+        daily_group = Decimal(str(daily_group_override))
+    else:
+        daily_group = DAILY_WAGE_MAP.get(
+            person_name or "",
+            ROLE_WAGE_MAP.get(role or "", Decimal("0")),
+        )
     single_yes = Decimal(str(runtime_overrides.get("single_yes", DEFAULT_SINGLE_YES)))
     single_no = Decimal(str(runtime_overrides.get("single_no", DEFAULT_SINGLE_NO)))
 
@@ -332,6 +336,7 @@ def settle_person(
         "project_ended": project_ended,
         "version_note": VERSION_NOTE,
         "date_sets_consistent": True,
+        "require_project_ended": bool(runtime_overrides.get("require_project_ended")),
     }
 
     checks, hard_failures = run_checks(context)

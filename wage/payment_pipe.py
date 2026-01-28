@@ -272,3 +272,27 @@ def compute_payments(
         voucher_duplicates=voucher_duplicates,
         empty_voucher_duplicates=empty_voucher_duplicates,
     )
+
+
+def collect_payment_people(
+    payment_rows: Iterable[Mapping[str, str]],
+    project_name: str | None,
+) -> set[str]:
+    rows = list(payment_rows)
+    headers = {key.strip() for row in rows for key in row.keys()}
+    name_key = _find_header(headers, NAME_HEADERS)
+    project_key = _find_header(headers, PROJECT_HEADERS)
+    if name_key is None:
+        return set()
+    people: set[str] = set()
+    for row in rows:
+        if not is_payment_candidate(row):
+            continue
+        name_value = row.get(name_key, "").strip()
+        if not name_value:
+            continue
+        raw_project = row.get(project_key, "").strip() if project_key else ""
+        if project_name and raw_project and raw_project != project_name:
+            continue
+        people.add(name_value)
+    return people

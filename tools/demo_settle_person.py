@@ -250,6 +250,10 @@ def main() -> int:
     payment_rows = _read_csv(selected[1])
 
     command = parse_command(command_text)
+    if command.get("mode") == "project":
+        from . import demo_settle_project
+
+        return demo_settle_project.main()
     if not command.get("project_name"):
         command["project_name"] = _derive_project_name(selected[0])
 

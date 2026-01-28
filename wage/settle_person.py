@@ -457,9 +457,12 @@ def settle_person(
     if payment.missing_amount_candidates:
         pending_reasons["金额缺失"] = len(payment.missing_amount_candidates)
 
+    title_line = (
+        f"{project_name or '项目未识别'}｜工资结算（{person_name or '未知'}｜{role or '未标注'}）"
+    )
     detail_lines = [
         "【详细版（给杰对账）】",
-        f"{project_name or '项目未识别'}｜工资结算（{person_name or '未知'}｜{role or '未标注'}）",
+        title_line,
         f"项目已结束：{project_ended_label}｜路补口令：{road_passphrase}",
         "1）出勤与模式：",
         f"    • 单防撞出勤 {single_yes_days} 天："
@@ -553,7 +556,7 @@ def settle_person(
             detail_lines.append(f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}")
     if not verbose and show_audit and show_logs_in_detail:
         detail_lines.append(f"日志：logs/{log_filename}")
-    compressed_lines = ["【压缩版（发员工）】"]
+    compressed_lines = ["【压缩版（发员工）】", title_line]
     compressed_lines.append(
         f"工资：{_format_decimal(daily_group)}×{group_yes_days}="
         f"{_format_decimal(pricing.wage_group)}（全组{group_yes_days}天）"

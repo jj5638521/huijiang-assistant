@@ -1,3 +1,4 @@
+from wage.ruleset import get_ruleset_version
 from wage.settle_person import settle_person
 
 
@@ -30,6 +31,7 @@ def _payment_rows() -> list[dict[str, str]]:
 
 
 def test_settle_person_outputs_two_segments() -> None:
+    version = get_ruleset_version()
     output = settle_person(
         _attendance_rows(),
         _payment_rows(),
@@ -42,7 +44,10 @@ def test_settle_person_outputs_two_segments() -> None:
 
     assert "【详细版（给杰对账）】" in output
     assert "【压缩版（发员工）】" in output
-    assert "计算口径版本 v2025-11-25R55｜阻断模式：Hard" in output
+    assert f"计算口径版本 {version}｜阻断模式：Hard" in output
+    assert f"- 规则版本: 计算口径版本 {version}｜阻断模式：Hard" in output
+    assert "待确认明细" not in output
+    assert "日期（模式→出勤）" not in output
 
 
 def test_settle_person_blocking_report() -> None:

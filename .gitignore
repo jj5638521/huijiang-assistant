@@ -25,6 +25,7 @@ __MACOSX/
 # 数据文件
 /data/attendance.csv
 /data/payment.csv
+/logs/
 
 # Python
 __pycache__/

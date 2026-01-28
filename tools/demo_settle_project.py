@@ -23,6 +23,7 @@ class PersonSummary:
     output_text: str
     blocked: bool
     pending_count: int
+    pending_summary: dict[str, int]
     blocking_codes: list[str]
     log_path: Path | None
 
@@ -65,14 +66,14 @@ def _extract_log_path(output: str) -> Path | None:
     return Path("logs") / match.group(1)
 
 
-def _load_pending_count(log_path: Path | None) -> int:
+def _load_pending_summary(log_path: Path | None) -> dict[str, int]:
     if not log_path or not log_path.exists():
-        return 0
+        return {}
     payload = json.loads(log_path.read_text(encoding="utf-8"))
     pending_summary = payload.get("pending_summary")
     if isinstance(pending_summary, dict):
-        return int(sum(pending_summary.values()))
-    return 0
+        return {key: int(value) for key, value in pending_summary.items()}
+    return {}
 
 
 def _resolve_role(
@@ -116,6 +117,14 @@ def _render_summary(
     success = total - blocked
     pending_people = sum(1 for person in people if person.pending_count > 0)
     pending_items = sum(person.pending_count for person in people)
+    pending_reason_people: dict[str, int] = {}
+    pending_reason_items: dict[str, int] = {}
+    for person in people:
+        for reason, count in person.pending_summary.items():
+            if count <= 0:
+                continue
+            pending_reason_people[reason] = pending_reason_people.get(reason, 0) + 1
+            pending_reason_items[reason] = pending_reason_items.get(reason, 0) + count
     if total != success + blocked:
         raise ValueError("汇总人数不一致")
 
@@ -130,6 +139,22 @@ def _render_summary(
     ]
 
     if pending_people:
+        lines.append("待确认原因汇总：")
+        reason_order = ["状态缺失", "状态无效", "类别待确认", "金额缺失"]
+        for reason in reason_order:
+            if reason not in pending_reason_items:
+                continue
+            lines.append(
+                f"- {reason}：人数{pending_reason_people.get(reason, 0)}｜条数"
+                f"{pending_reason_items[reason]}"
+            )
+        for reason in sorted(pending_reason_items):
+            if reason in reason_order:
+                continue
+            lines.append(
+                f"- {reason}：人数{pending_reason_people.get(reason, 0)}｜条数"
+                f"{pending_reason_items[reason]}"
+            )
         lines.append("待确认明细：")
         for person in people:
             if person.pending_count <= 0:
@@ -212,13 +237,15 @@ def settle_project(
 
         blocked = output_text.startswith("【阻断｜工资结算】")
         log_path = _extract_log_path(output_text)
-        pending_count = _load_pending_count(log_path)
+        pending_summary = _load_pending_summary(log_path)
+        pending_count = sum(pending_summary.values())
         person_summaries.append(
             PersonSummary(
                 name=name,
                 output_text=output_text,
                 blocked=blocked,
                 pending_count=pending_count,
+                pending_summary=pending_summary,
                 blocking_codes=_parse_blocking_codes(output_text) if blocked else [],
                 log_path=log_path,
             )

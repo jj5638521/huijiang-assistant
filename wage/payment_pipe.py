@@ -55,6 +55,7 @@ class PaymentResult:
     project_expense_items: list[PaymentItem]
     road_allowance_items: list[PaymentItem]
     pending_items: list[PaymentItem]
+    missing_status_items: list[PaymentItem]
     invalid_status_items: list[PaymentItem]
     missing_fields: list[str]
     invalid_amounts: list[str]
@@ -178,6 +179,7 @@ def compute_payments(
     project_expense_items: list[PaymentItem] = []
     road_allowance_items: list[PaymentItem] = []
     pending_items: list[PaymentItem] = []
+    missing_status_items: list[PaymentItem] = []
     invalid_status_items: list[PaymentItem] = []
 
     for index, row in enumerate(rows, start=1):
@@ -239,6 +241,10 @@ def compute_payments(
             else:
                 empty_voucher_seen.add(empty_key)
 
+        if not status_value:
+            pending_items.append(item)
+            missing_status_items.append(item)
+            continue
         if status_value not in STATUS_WHITELIST:
             pending_items.append(item)
             invalid_status_items.append(item)
@@ -260,6 +266,7 @@ def compute_payments(
     project_expense_items.sort(key=lambda item: (item.date, item.amount))
     road_allowance_items.sort(key=lambda item: (item.date, item.amount))
     pending_items.sort(key=lambda item: (item.date, item.amount))
+    missing_status_items.sort(key=lambda item: (item.date, item.amount))
     invalid_status_items.sort(key=lambda item: (item.date, item.amount))
 
     return PaymentResult(
@@ -268,6 +275,7 @@ def compute_payments(
         project_expense_items=project_expense_items,
         road_allowance_items=road_allowance_items,
         pending_items=pending_items,
+        missing_status_items=missing_status_items,
         invalid_status_items=invalid_status_items,
         missing_fields=missing_fields,
         invalid_amounts=invalid_amounts,

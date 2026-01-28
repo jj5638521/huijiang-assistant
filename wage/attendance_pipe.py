@@ -19,6 +19,21 @@ WORK_HEADERS = ["是否施工", "出勤", "施工", "今天是否施工", "是�
 VEHICLE_HEADERS = ["车辆", "车辆信息", "车牌"]
 PROJECT_HEADERS = ["项目", "项目名称"]
 ROLE_HEADERS = ["角色", "职务", "岗位"]
+PAYMENT_ANCHOR_TOKENS = [
+    "报销类型",
+    "费用类型",
+    "类别",
+    "科目",
+    "报销状态",
+    "支付状态",
+    "报销结果",
+    "金额",
+    "报销金额",
+    "凭证",
+    "票据",
+    "流水",
+    "订单",
+]
 
 
 @dataclass(frozen=True)
@@ -72,6 +87,14 @@ def _parse_date(value: str) -> tuple[str | None, str | None]:
     return None, raw
 
 
+def _find_payment_anchor_headers(headers: set[str]) -> list[str]:
+    return [
+        header
+        for header in headers
+        if any(token in header for token in PAYMENT_ANCHOR_TOKENS)
+    ]
+
+
 def _normalize_role(value: str) -> str | None:
     text = value.strip()
     if not text:
@@ -114,6 +137,7 @@ def compute_attendance(
     vehicle_key = _find_header(headers, VEHICLE_HEADERS)
     project_key = _find_header(headers, PROJECT_HEADERS)
     role_key = _find_header(headers, ROLE_HEADERS)
+    payment_anchor_keys = _find_payment_anchor_headers(headers)
 
     missing_fields = []
     for key, label in (
@@ -139,6 +163,10 @@ def compute_attendance(
     for row in rows:
         if date_key is None or name_key is None or work_key is None:
             continue
+        work_value = row.get(work_key, "")
+        if not work_value.strip() and payment_anchor_keys:
+            if any(row.get(key, "").strip() for key in payment_anchor_keys):
+                continue
         date_value = row.get(date_key, "")
         parsed_date, raw_date = _parse_date(date_value)
         if parsed_date is None:
@@ -157,7 +185,6 @@ def compute_attendance(
             normalization_logs.append(
                 f"姓名拆分: '{name_value}' -> '{'、'.join(name_list)}'"
             )
-        work_value = row.get(work_key, "")
         is_work = _is_work(work_value)
         vehicle_value = row.get(vehicle_key, "").strip() if vehicle_key else ""
         role_value = row.get(role_key, "").strip() if role_key else ""

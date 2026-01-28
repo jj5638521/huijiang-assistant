@@ -9,7 +9,7 @@
 - `wage/`：工资结算逻辑入口（当前仅占位）。
 - `tools/`：命令行工具示例。
 - `tests/`：pytest 测试入口。
-- `data/`：示例数据目录（本仓库忽略实际 CSV 文件；本次文件放到 `data/当前/`，历史文件放到 `data/归档/`）。
+- `data/`：示例数据目录（推荐把本次 CSV 拖到 `data/当前/`；历史 CSV 放 `data/归档/`；文件名随意）。
 
 为方便中文路径使用，已提供以下软链接：
 
@@ -21,4 +21,4 @@
 ### 本地运行
 
 - `python3 -m pytest -q`
-- 推荐用法：本次文件放 `数据/当前/`，历史放 `数据/归档/`，运行 `python3 -m tools.demo_settle_person`
+- `python3 -m tools.demo_settle_person`（推荐把本次文件拖到 `数据/当前/`；历史放 `数据/归档/`）

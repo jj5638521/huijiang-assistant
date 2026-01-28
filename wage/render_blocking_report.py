@@ -17,6 +17,8 @@ def render_blocking_report(
     missing_fields: list[str],
     invalid_items: list[str],
     suggestions: list[str],
+    include_hash: bool,
+    output_hash_placeholder: str,
 ) -> str:
     lines = ["【阻断｜工资结算】"]
     title = f"对象: {person_name or '未知'}"
@@ -41,5 +43,7 @@ def render_blocking_report(
     lines.append("审计留痕:")
     lines.append(f"- run_id: {run_id}")
     lines.append(f"- 规则版本: {version_note}")
-    lines.append(f"- input_hash: {input_hash}")
+    if include_hash:
+        lines.append(f"- input_hash: {input_hash}")
+        lines.append(f"- output_hash: {output_hash_placeholder}")
     return "\n".join(lines)

@@ -16,6 +16,7 @@ from .ruleset import get_ruleset_version
 
 RULE_VERSION = get_ruleset_version()
 VERSION_NOTE = f"计算口径版本 {RULE_VERSION}｜阻断模式：Hard"
+OUTPUT_HASH_PLACEHOLDER = "__OUTPUT_HASH__"
 
 DAILY_WAGE_MAP = {
     "王怀宇": Decimal("300"),
@@ -332,11 +333,38 @@ def settle_person(
     suggestions = _collect_suggestions(attendance, payment)
 
     if hard_failures:
+        report = render_blocking_report(
+            person_name=person_name,
+            project_name=project_name,
+            run_id=run_id,
+            version_note=VERSION_NOTE,
+            input_hash=input_hash,
+            hard_failures=hard_failures,
+            missing_fields=missing_items,
+            invalid_items=invalid_items,
+            suggestions=suggestions,
+            include_hash=bool(verbose),
+            output_hash_placeholder=OUTPUT_HASH_PLACEHOLDER,
+        )
+        output_text = report
+        if not verbose:
+            output_text = f"{output_text}\n日志：logs/{run_id}.json"
+        output_hash_source = (
+            output_text.replace(
+                f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}", ""
+            )
+            if verbose
+            else output_text
+        )
+        output_hash = _hash_payload(output_hash_source)
+        if verbose:
+            output_text = output_text.replace(OUTPUT_HASH_PLACEHOLDER, output_hash)
         log_payload = {
             "run_id": run_id,
             "ruleset_version": RULE_VERSION,
             "version_note": VERSION_NOTE,
             "input_hash": input_hash,
+            "output_hash": output_hash,
             "hard_failures": [
                 {
                     "code": check.code,
@@ -350,20 +378,11 @@ def settle_person(
             "suggestions": suggestions,
         }
         _write_log(run_id, log_payload)
-        return render_blocking_report(
-            person_name=person_name,
-            project_name=project_name,
-            run_id=run_id,
-            version_note=VERSION_NOTE,
-            input_hash=input_hash,
-            hard_failures=hard_failures,
-            missing_fields=missing_items,
-            invalid_items=invalid_items,
-            suggestions=suggestions,
-        )
+        return output_text
 
     auto_logs = attendance.auto_corrections + attendance.normalization_logs
-    differences = auto_logs if auto_logs else ["无"]
+    differences = auto_logs if verbose else []
+    differences_for_log = auto_logs
 
     group_yes_days = len(attendance.date_sets["全组｜出勤"])
     group_no_days = len(attendance.date_sets["全组｜未出勤"])
@@ -457,7 +476,7 @@ def settle_person(
             f"【当期应付为负：员工需返还或下期冲减｜负值金额：¥{_format_decimal(-pricing.payable)}】"
         )
     detail_lines.append("5）差异清单：")
-    if differences == ["无"]:
+    if not differences:
         detail_lines.append("    • 无")
     else:
         for item in differences:
@@ -471,8 +490,9 @@ def settle_person(
     detail_lines.append("8）审计留痕：")
     detail_lines.append(f"- run_id: {run_id}")
     detail_lines.append(f"- 规则版本: {VERSION_NOTE}")
-    detail_lines.append(f"- input_hash: {input_hash}")
-    detail_lines.append("- output_hash: __OUTPUT_HASH__ (不含hash行)")
+    if verbose:
+        detail_lines.append(f"- input_hash: {input_hash}")
+        detail_lines.append(f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}")
     compressed_lines = ["【压缩版（发员工）】"]
     single_suffix = f" + 单防撞{single_yes_days}天" if single_yes_days > 0 else ""
     compressed_lines.append(
@@ -498,11 +518,19 @@ def settle_person(
 
     detailed = "\n".join(detail_lines)
     compressed = "\n".join(compressed_lines)
-    output_hash_source = "\n\n".join(
-        [detailed.replace("__OUTPUT_HASH__ (不含hash行)", ""), compressed]
+    output_text = "\n\n".join([detailed, compressed])
+    if not verbose:
+        output_text = f"{output_text}\n日志：logs/{run_id}.json"
+    output_hash_source = (
+        output_text.replace(
+            f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}", ""
+        )
+        if verbose
+        else output_text
     )
     output_hash = _hash_payload(output_hash_source)
-    detailed = detailed.replace("__OUTPUT_HASH__", output_hash)
+    if verbose:
+        output_text = output_text.replace(OUTPUT_HASH_PLACEHOLDER, output_hash)
     log_payload = {
         "run_id": run_id,
         "ruleset_version": RULE_VERSION,
@@ -547,7 +575,7 @@ def settle_person(
             "prepay_total": _format_decimal(pricing.prepay_total),
             "payable": _format_decimal(pricing.payable),
         },
-        "differences": differences if differences != ["无"] else [],
+        "differences": differences_for_log,
         "pending_summary": pending_reasons,
         "checks": [
             {
@@ -562,4 +590,4 @@ def settle_person(
     }
     _write_log(run_id, log_payload)
 
-    return "\n\n".join([detailed, compressed])
+    return output_text

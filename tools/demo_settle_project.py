@@ -140,7 +140,14 @@ def _render_summary(
 
     if pending_people:
         lines.append("待确认原因汇总：")
-        reason_order = ["状态缺失", "状态无效", "类别待确认", "金额缺失"]
+        reason_order = [
+            "状态缺失",
+            "已通过未支付",
+            "未通过",
+            "状态无效",
+            "类别待确认",
+            "金额缺失",
+        ]
         for reason in reason_order:
             if reason not in pending_reason_items:
                 continue

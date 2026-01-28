@@ -201,6 +201,64 @@ def test_settle_person_missing_status_moves_to_pending() -> None:
     assert "待确认清单" not in output
 
 
+def test_settle_person_result_passed_moves_to_pending() -> None:
+    payment_rows = [
+        {
+            "报销日期": "2025-11-04",
+            "报销金额": "300",
+            "报销状态": "",
+            "报销结果": "通过",
+            "报销类型": "工资",
+            "报销人员": "王怀宇",
+            "项目": "测试项目",
+            "上传凭证": "V012",
+        }
+    ]
+    output = settle_person(
+        _attendance_rows(),
+        payment_rows,
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+
+    assert not output.startswith("【阻断｜工资结算】")
+    assert "已付合计：0｜预支合计：0" in output
+    assert "待确认汇总：已通过未支付1条" in output
+    assert "待确认清单" not in output
+
+
+def test_settle_person_result_rejected_moves_to_pending() -> None:
+    payment_rows = [
+        {
+            "报销日期": "2025-11-04",
+            "报销金额": "300",
+            "报销状态": "",
+            "报销结果": "未通过",
+            "报销类型": "工资",
+            "报销人员": "王怀宇",
+            "项目": "测试项目",
+            "上传凭证": "V013",
+        }
+    ]
+    output = settle_person(
+        _attendance_rows(),
+        payment_rows,
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+
+    assert not output.startswith("【阻断｜工资结算】")
+    assert "已付合计：0｜预支合计：0" in output
+    assert "待确认汇总：未通过1条" in output
+    assert "待确认清单" not in output
+
+
 def test_settle_person_status_reimbursed_counts_as_paid() -> None:
     payment_rows = [
         {

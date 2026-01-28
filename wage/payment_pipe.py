@@ -8,6 +8,7 @@ from typing import Iterable, Mapping
 DATE_HEADERS = ["报销日期", "支付日期", "打款日期", "日期"]
 AMOUNT_HEADERS = ["报销金额", "金额", "支付金额", "实付金额"]
 STATUS_HEADERS = ["报销状态", "状态", "付款状态"]
+RESULT_HEADERS = ["报销结果", "审核结果", "审批结果", "结果"]
 TYPE_HEADERS = ["报销类型", "费用类型", "类别", "类型", "科目"]
 NAME_HEADERS = ["报销人员", "姓名", "收款人", "人员"]
 PROJECT_HEADERS = ["项目", "项目名称"]
@@ -17,6 +18,7 @@ REMARK_HEADERS = ["备注", "说明", "报销备注", "用途"]
 CANDIDATE_AMOUNT_HEADERS = ["金额", "报销金额", "支付金额", "实付金额"]
 CANDIDATE_CATEGORY_HEADERS = ["报销类型", "费用类型", "类型", "类别", "科目"]
 CANDIDATE_STATUS_HEADERS = ["报销状态", "状态", "付款状态"]
+CANDIDATE_RESULT_HEADERS = ["报销结果", "审核结果", "审批结果", "结果"]
 CANDIDATE_VOUCHER_HEADERS = ["凭证号", "上传凭证", "票据号", "流水号", "订单号"]
 CANDIDATE_REMARK_HEADERS = ["备注", "用途", "说明"]
 
@@ -57,6 +59,8 @@ class PaymentResult:
     pending_items: list[PaymentItem]
     missing_status_items: list[PaymentItem]
     invalid_status_items: list[PaymentItem]
+    approved_result_items: list[PaymentItem]
+    rejected_result_items: list[PaymentItem]
     missing_fields: list[str]
     invalid_amounts: list[str]
     missing_amount_candidates: list[str]
@@ -111,6 +115,7 @@ def is_payment_candidate(row: Mapping[str, str]) -> bool:
     for header_group in (
         CANDIDATE_CATEGORY_HEADERS,
         CANDIDATE_STATUS_HEADERS,
+        CANDIDATE_RESULT_HEADERS,
         CANDIDATE_VOUCHER_HEADERS,
         CANDIDATE_REMARK_HEADERS,
     ):
@@ -149,6 +154,7 @@ def compute_payments(
     date_key = _find_header(headers, DATE_HEADERS)
     amount_key = _find_header(headers, AMOUNT_HEADERS)
     status_key = _find_header(headers, STATUS_HEADERS)
+    result_key = _find_header(headers, RESULT_HEADERS)
     type_key = _find_header(headers, TYPE_HEADERS)
     name_key = _find_header(headers, NAME_HEADERS)
     project_key = _find_header(headers, PROJECT_HEADERS)
@@ -181,6 +187,8 @@ def compute_payments(
     pending_items: list[PaymentItem] = []
     missing_status_items: list[PaymentItem] = []
     invalid_status_items: list[PaymentItem] = []
+    approved_result_items: list[PaymentItem] = []
+    rejected_result_items: list[PaymentItem] = []
 
     for index, row in enumerate(rows, start=1):
         if not is_payment_candidate(row):
@@ -190,6 +198,7 @@ def compute_payments(
         date_value = _normalize_date(row.get(date_key, ""))
         amount_raw = row.get(amount_key, "")
         status_value = row.get(status_key, "").strip()
+        result_value = row.get(result_key, "").strip() if result_key else ""
         type_value = row.get(type_key, "").strip()
         name_value = row.get(name_key, "").strip()
         project_value = row.get(project_key, "").strip() if project_key else ""
@@ -242,8 +251,15 @@ def compute_payments(
                 empty_voucher_seen.add(empty_key)
 
         if not status_value:
-            pending_items.append(item)
-            missing_status_items.append(item)
+            if result_value == "通过":
+                pending_items.append(item)
+                approved_result_items.append(item)
+            elif result_value == "未通过":
+                pending_items.append(item)
+                rejected_result_items.append(item)
+            else:
+                pending_items.append(item)
+                missing_status_items.append(item)
             continue
         if status_value not in STATUS_WHITELIST:
             pending_items.append(item)
@@ -268,6 +284,8 @@ def compute_payments(
     pending_items.sort(key=lambda item: (item.date, item.amount))
     missing_status_items.sort(key=lambda item: (item.date, item.amount))
     invalid_status_items.sort(key=lambda item: (item.date, item.amount))
+    approved_result_items.sort(key=lambda item: (item.date, item.amount))
+    rejected_result_items.sort(key=lambda item: (item.date, item.amount))
 
     return PaymentResult(
         paid_items=paid_items,
@@ -277,6 +295,8 @@ def compute_payments(
         pending_items=pending_items,
         missing_status_items=missing_status_items,
         invalid_status_items=invalid_status_items,
+        approved_result_items=approved_result_items,
+        rejected_result_items=rejected_result_items,
         missing_fields=missing_fields,
         invalid_amounts=invalid_amounts,
         missing_amount_candidates=missing_amount_candidates,

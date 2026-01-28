@@ -78,7 +78,13 @@ def test_settle_person_outputs_two_segments() -> None:
     assert "待确认明细" not in output
     detailed, compressed = output.split("\n\n")
     assert "日期（模式→出勤）" in compressed
-    assert "2025-11：" in compressed
+    assert "2025-11-01" in compressed
+    assert "工资：300×1=300（全组1天）" in compressed
+    assert "单防撞：270×1 + 135×0=270；最终工资合计=570" in compressed
+    assert "餐补：25×1 + 40×1=65（施工1天/未施工1天）" in compressed
+    assert (
+        "应付：工资570 + 餐补65 + 路补0 - 已付300 - 预支0 = 335" in compressed
+    )
     assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", output)
 
 

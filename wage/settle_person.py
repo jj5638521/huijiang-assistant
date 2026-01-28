@@ -67,23 +67,6 @@ def _build_date_list(dates: list[str]) -> str:
     return "、".join(dates) if dates else "无"
 
 
-def _format_dates_by_month(dates: list[str]) -> str:
-    if not dates:
-        return "无"
-    month_map: dict[str, list[str]] = {}
-    for date in sorted(dates):
-        parts = date.split("-")
-        if len(parts) >= 3:
-            month = "-".join(parts[:2])
-            day = parts[2]
-            if day.isdigit():
-                day = str(int(day))
-            month_map.setdefault(month, []).append(day)
-        else:
-            month_map.setdefault("未知", []).append(date)
-    return "；".join(f"{month}：{'、'.join(days)}" for month, days in month_map.items())
-
-
 def _render_mode_dates(
     date_sets: dict[str, list[str]],
     *,
@@ -102,7 +85,7 @@ def _render_mode_dates(
         if not dates:
             continue
         lines.append(
-            f"{indent}{bullet}{label}（{len(dates)}天）：{_format_dates_by_month(dates)}"
+            f"{indent}{bullet}{label}（{len(dates)}天）：{_build_date_list(dates)}"
         )
     return lines
 
@@ -525,19 +508,34 @@ def settle_person(
             detail_lines.append(f"- input_hash: {input_hash}")
             detail_lines.append(f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}")
     compressed_lines = ["【压缩版（发员工）】"]
-    single_suffix = f" + 单防撞{single_yes_days}天" if single_yes_days > 0 else ""
     compressed_lines.append(
-        f"工资：{_format_decimal(pricing.wage_total)}"
-        f"（全组{group_yes_days}天{single_suffix}）"
+        f"工资：{_format_decimal(daily_group)}×{group_yes_days}="
+        f"{_format_decimal(pricing.wage_group)}（全组{group_yes_days}天）"
     )
-    if pricing.meal_total != 0:
+    if single_yes_days or single_no_days:
         compressed_lines.append(
-            f"餐补：{_format_decimal(pricing.meal_total)}（仅全组参与）"
+            "单防撞："
+            f"{_format_decimal(single_yes)}×{single_yes_days} + "
+            f"{_format_decimal(single_no)}×{single_no_days}="
+            f"{_format_decimal(pricing.wage_single_yes + pricing.wage_single_no)}；"
+            f"最终工资合计={_format_decimal(pricing.wage_total)}"
         )
+    compressed_lines.append(
+        "餐补："
+        f"25×{group_yes_days} + 40×{group_no_days}="
+        f"{_format_decimal(pricing.meal_total)}"
+        f"（施工{group_yes_days}天/未施工{group_no_days}天）"
+    )
     if pricing.travel_total != 0:
         compressed_lines.append(f"路补：{_format_decimal(pricing.travel_total)}")
     compressed_lines.append(
-        f"应付：{_format_decimal(pricing.payable)}"
+        "应付："
+        f"工资{_format_decimal(pricing.wage_total)} + "
+        f"餐补{_format_decimal(pricing.meal_total)} + "
+        f"路补{_format_decimal(pricing.travel_total)} - "
+        f"已付{_format_decimal(pricing.paid_total)} - "
+        f"预支{_format_decimal(pricing.prepay_total)} = "
+        f"{_format_decimal(pricing.payable)}"
     )
     compressed_lines.extend(
         _render_mode_dates(

@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from wage.command import parse_command
 from wage.settle_person import settle_person
 
 ATTENDANCE_FIELDS = {
@@ -15,6 +16,7 @@ ATTENDANCE_FIELDS = {
     "施工人员",
     "实际施工人员",
     "工作日期",
+    "日期",
 }
 PAYMENT_FIELDS = {
     "报销日期",
@@ -24,13 +26,18 @@ PAYMENT_FIELDS = {
     "费用类型",
     "上传凭证",
     "凭证号",
+    "项目",
 }
 
-
-def _read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open("r", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        return list(reader)
+COMMON_SUFFIXES = [
+    "出勤表",
+    "施工表",
+    "考勤表",
+    "报销表",
+    "支付表",
+    "付款表",
+    "支付记录",
+]
 
 
 @dataclass(frozen=True)
@@ -39,6 +46,12 @@ class CsvCandidate:
     attendance_score: int
     payment_score: int
     mtime: float
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader)
 
 
 def _read_headers(path: Path) -> list[str]:
@@ -171,10 +184,33 @@ def _print_candidate_report(candidates: list[CsvCandidate]) -> None:
         )
 
 
+def _read_command_file(command_path: Path) -> str | None:
+    if not command_path.exists():
+        print("未找到口令文件，请创建 data/当前/口令.txt（UTF-8）")
+        print("示例口令：工资：王怀宇 组长 项目已结束=是 项目=溧马一溧芜设标-凌云")
+        return None
+    return command_path.read_text(encoding="utf-8").strip()
+
+
+def _derive_project_name(path: Path) -> str:
+    name = path.stem
+    for suffix in COMMON_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return name.strip("-_")
+
+
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     data_dir = repo_root / "data"
     data_dir.mkdir(exist_ok=True)
+
+    command_path = data_dir / "当前" / "口令.txt"
+    command_text = _read_command_file(command_path)
+    if not command_text:
+        return 0
+
     selected = _resolve_input_paths(data_dir)
     if selected is None:
         return 0
@@ -182,10 +218,20 @@ def main() -> int:
     attendance_rows = _read_csv(selected[0])
     payment_rows = _read_csv(selected[1])
 
-    print(f"出勤表: {selected[0].resolve()}")
-    print(f"报销表: {selected[1].resolve()}")
-    result = settle_person(attendance_rows, payment_rows)
-    print(result)
+    command = parse_command(command_text)
+    if not command.get("project_name"):
+        command["project_name"] = _derive_project_name(selected[0])
+
+    output = settle_person(
+        attendance_rows,
+        payment_rows,
+        person_name=command.get("person_name"),
+        role=command.get("role"),
+        project_ended=command.get("project_ended"),
+        project_name=command.get("project_name"),
+        runtime_overrides=command.get("runtime_overrides"),
+    )
+    print(output)
     return 0
 
 

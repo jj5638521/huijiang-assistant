@@ -5,14 +5,16 @@ import hashlib
 import json
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import Iterable, Mapping
 
 from .attendance_pipe import AttendanceResult, compute_attendance
 from .checks import CheckResult, run_checks
 from .payment_pipe import PaymentResult, compute_payments
 from .render_blocking_report import render_blocking_report
+from .ruleset import get_ruleset_version
 
-RULE_VERSION = "v2025-11-25R55"
+RULE_VERSION = get_ruleset_version()
 VERSION_NOTE = f"计算口径版本 {RULE_VERSION}｜阻断模式：Hard"
 
 DAILY_WAGE_MAP = {
@@ -115,12 +117,40 @@ def _render_payment_items(title: str, items: list[object]) -> list[str]:
     return lines
 
 
-def _render_checks(checks: list[CheckResult]) -> list[str]:
-    lines = []
+def _render_check_summary(checks: list[CheckResult]) -> str:
+    parts = []
     for check in checks:
-        status = "通过" if check.passed else "失败"
-        lines.append(f"- [{check.code}] {check.name}: {status}｜{check.detail}")
-    return lines
+        symbol = "✓" if check.passed else "×"
+        parts.append(f"{check.code}{symbol}")
+    return " ".join(parts)
+
+
+def _serialize_payment_items(items: list[object]) -> list[dict[str, str]]:
+    serialized = []
+    for item in items:
+        serialized.append(
+            {
+                "date": item.date,
+                "name": item.name,
+                "project": item.project,
+                "amount": _format_decimal(item.amount),
+                "category": item.category,
+                "status": item.status,
+                "voucher": item.voucher,
+                "raw_type": item.raw_type,
+            }
+        )
+    return serialized
+
+
+def _write_log(run_id: str, payload: dict) -> None:
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{run_id}.json"
+    log_path.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _collect_missing_items(attendance: AttendanceResult, payment: PaymentResult) -> list[str]:
@@ -186,6 +216,7 @@ def settle_person(
     attendance = compute_attendance(attendance_list, project_name, person_name)
     payment = compute_payments(payment_list, project_name, person_name)
 
+    verbose = int(runtime_overrides.get("verbose", 0))
     daily_group = DAILY_WAGE_MAP.get(
         person_name or "",
         ROLE_WAGE_MAP.get(role or "", Decimal("0")),
@@ -230,6 +261,24 @@ def settle_person(
     suggestions = _collect_suggestions(attendance, payment)
 
     if hard_failures:
+        log_payload = {
+            "run_id": run_id,
+            "ruleset_version": RULE_VERSION,
+            "version_note": VERSION_NOTE,
+            "input_hash": input_hash,
+            "hard_failures": [
+                {
+                    "code": check.code,
+                    "name": check.name,
+                    "detail": check.detail,
+                }
+                for check in hard_failures
+            ],
+            "missing_items": missing_items,
+            "invalid_items": invalid_items,
+            "suggestions": suggestions,
+        }
+        _write_log(run_id, log_payload)
         return render_blocking_report(
             person_name=person_name,
             project_name=project_name,
@@ -249,6 +298,16 @@ def settle_person(
     group_no_days = len(attendance.date_sets["全组｜未出勤"])
     single_yes_days = len(attendance.date_sets["单防撞｜出勤"])
     single_no_days = len(attendance.date_sets["单防撞｜未出勤"])
+
+    pending_total = len(payment.pending_items) + len(payment.missing_amount_candidates)
+    pending_reasons: dict[str, int] = {}
+    if payment.invalid_status_items:
+        pending_reasons["状态无效"] = len(payment.invalid_status_items)
+    pending_other = len(payment.pending_items) - len(payment.invalid_status_items)
+    if pending_other:
+        pending_reasons["类别待确认"] = pending_other
+    if payment.missing_amount_candidates:
+        pending_reasons["金额缺失"] = len(payment.missing_amount_candidates)
 
     detail_lines = [
         "【详细版（给杰对账）】",
@@ -274,17 +333,19 @@ def settle_person(
         "3）已付/预支明细：",
     ]
 
-    detail_lines.extend(_render_payment_items("- 已付", payment.paid_items))
-    detail_lines.extend(_render_payment_items("- 预支", payment.prepay_items))
     detail_lines.append(
-        f"已付合计：{_format_decimal(pricing.paid_total)}｜预支合计：{_format_decimal(pricing.prepay_total)}"
+        f"- 已付合计：{_format_decimal(pricing.paid_total)}｜预支合计：{_format_decimal(pricing.prepay_total)}"
     )
-    pending_total = len(payment.pending_items) + len(payment.missing_amount_candidates)
-    detail_lines.append(f"待确认条数：{pending_total}")
-    if payment.missing_amount_candidates:
-        detail_lines.append("待确认明细（疑似支付行但金额缺失）：")
-        for evidence in payment.missing_amount_candidates:
-            detail_lines.append(f"- {evidence}")
+    if verbose:
+        detail_lines.extend(_render_payment_items("- 已付明细", payment.paid_items))
+        detail_lines.extend(_render_payment_items("- 预支明细", payment.prepay_items))
+    else:
+        detail_lines.append(f"- 明细详见 logs/{run_id}.json")
+    if pending_total:
+        pending_summary = "，".join(
+            f"{reason}{count}条" for reason, count in pending_reasons.items()
+        )
+        detail_lines.append(f"待确认汇总：{pending_summary}")
     detail_lines.append(
         "4）应付：工资 + 餐补 + 路补 - 已付 - 预支"
         f" = {_format_decimal(pricing.payable)}"
@@ -294,22 +355,25 @@ def settle_person(
             f"【当期应付为负：员工需返还或下期冲减｜负值金额：¥{_format_decimal(-pricing.payable)}】"
         )
     detail_lines.append("5）差异清单：")
-    for item in differences:
-        detail_lines.append(f"- {item}")
-    detail_lines.append("6）校核摘要：")
-    detail_lines.extend(_render_checks(checks))
-    detail_lines.append("7）审计留痕：")
+    if differences == ["无"]:
+        detail_lines.append("- 无")
+    else:
+        detail_lines.append(f"- 共{len(differences)}条，详见 logs/{run_id}.json")
+        if verbose:
+            for item in differences:
+                detail_lines.append(f"- {item}")
+    detail_lines.append("6）备注与校核摘要：")
+    detail_lines.append("餐补口径：25×施工天 + 40×未施工天（当前口径=0）")
+    detail_lines.append("二管道隔离：工资结算与支付流水分账核算")
+    detail_lines.append(f"单防撞命中：{len(attendance.fangzhuang_hits)}条")
+    detail_lines.append("7）校核摘要：")
+    detail_lines.append(_render_check_summary(checks))
+    detail_lines.append("8）审计留痕：")
     detail_lines.append(f"- run_id: {run_id}")
     detail_lines.append(f"- 规则版本: {VERSION_NOTE}")
     detail_lines.append(f"- input_hash: {input_hash}")
     detail_lines.append("- output_hash: __OUTPUT_HASH__ (不含hash行)")
-    if attendance.fangzhuang_hits:
-        detail_lines.append(f"- 防撞标记: {len(attendance.fangzhuang_hits)}条")
     detail_lines.append(VERSION_NOTE)
-    detail_lines.append("日期（模式→出勤）")
-    for label, dates in attendance.date_sets.items():
-        if dates:
-            detail_lines.append(f"{label}: {_build_date_list(dates)}")
 
     compressed_lines = ["【压缩版（发员工）】"]
     if pricing.wage_total != 0:
@@ -336,5 +400,60 @@ def settle_person(
     )
     output_hash = _hash_payload(output_hash_source)
     detailed = detailed.replace("__OUTPUT_HASH__", output_hash)
+    log_payload = {
+        "run_id": run_id,
+        "ruleset_version": RULE_VERSION,
+        "version_note": VERSION_NOTE,
+        "input_hash": input_hash,
+        "output_hash": output_hash,
+        "attendance": {
+            "date_sets": attendance.date_sets,
+            "mode_by_date": attendance.mode_by_date,
+            "missing_fields": attendance.missing_fields,
+            "invalid_dates": attendance.invalid_dates,
+            "project_mismatches": attendance.project_mismatches,
+            "conflict_logs": attendance.conflict_logs,
+            "normalization_logs": attendance.normalization_logs,
+            "auto_corrections": attendance.auto_corrections,
+            "fangzhuang_hits": attendance.fangzhuang_hits,
+        },
+        "payment": {
+            "paid_items": _serialize_payment_items(payment.paid_items),
+            "prepay_items": _serialize_payment_items(payment.prepay_items),
+            "project_expense_items": _serialize_payment_items(payment.project_expense_items),
+            "pending_items": _serialize_payment_items(payment.pending_items),
+            "missing_amount_candidates": payment.missing_amount_candidates,
+            "invalid_status_items": _serialize_payment_items(payment.invalid_status_items),
+            "missing_fields": payment.missing_fields,
+            "invalid_amounts": payment.invalid_amounts,
+            "project_mismatches": payment.project_mismatches,
+            "voucher_duplicates": payment.voucher_duplicates,
+            "empty_voucher_duplicates": payment.empty_voucher_duplicates,
+        },
+        "pricing": {
+            "wage_group": _format_decimal(pricing.wage_group),
+            "wage_single_yes": _format_decimal(pricing.wage_single_yes),
+            "wage_single_no": _format_decimal(pricing.wage_single_no),
+            "wage_total": _format_decimal(pricing.wage_total),
+            "meal_total": _format_decimal(pricing.meal_total),
+            "travel_total": _format_decimal(pricing.travel_total),
+            "paid_total": _format_decimal(pricing.paid_total),
+            "prepay_total": _format_decimal(pricing.prepay_total),
+            "payable": _format_decimal(pricing.payable),
+        },
+        "differences": differences if differences != ["无"] else [],
+        "pending_summary": pending_reasons,
+        "checks": [
+            {
+                "code": check.code,
+                "name": check.name,
+                "passed": check.passed,
+                "severity": check.severity,
+                "detail": check.detail,
+            }
+            for check in checks
+        ],
+    }
+    _write_log(run_id, log_payload)
 
     return "\n\n".join([detailed, compressed])

@@ -51,6 +51,7 @@ class PaymentResult:
     paid_items: list[PaymentItem]
     prepay_items: list[PaymentItem]
     project_expense_items: list[PaymentItem]
+    road_allowance_items: list[PaymentItem]
     pending_items: list[PaymentItem]
     invalid_status_items: list[PaymentItem]
     missing_fields: list[str]
@@ -128,8 +129,10 @@ def _categorize(raw_type: str) -> str:
         return "预支"
     if any(keyword in text for keyword in ("餐补", "伙食", "盒饭", "工作餐")):
         return "餐补"
-    if any(keyword in text for keyword in ("路费", "打车", "车票", "滴滴", "网约车", "顺风车")):
+    if any(keyword in text for keyword in ("油费", "ETC")):
         return "路费"
+    if any(keyword in text for keyword in ("路补", "顺风车", "拼车", "打车", "滴滴", "路费")):
+        return "路补"
     return "其他"
 
 
@@ -171,6 +174,7 @@ def compute_payments(
     paid_items: list[PaymentItem] = []
     prepay_items: list[PaymentItem] = []
     project_expense_items: list[PaymentItem] = []
+    road_allowance_items: list[PaymentItem] = []
     pending_items: list[PaymentItem] = []
     invalid_status_items: list[PaymentItem] = []
 
@@ -240,6 +244,8 @@ def compute_payments(
             paid_items.append(item)
         elif category == "预支":
             prepay_items.append(item)
+        elif category == "路补":
+            road_allowance_items.append(item)
         elif category == "路费":
             project_expense_items.append(item)
         else:
@@ -248,6 +254,7 @@ def compute_payments(
     paid_items.sort(key=lambda item: (item.date, item.amount))
     prepay_items.sort(key=lambda item: (item.date, item.amount))
     project_expense_items.sort(key=lambda item: (item.date, item.amount))
+    road_allowance_items.sort(key=lambda item: (item.date, item.amount))
     pending_items.sort(key=lambda item: (item.date, item.amount))
     invalid_status_items.sort(key=lambda item: (item.date, item.amount))
 
@@ -255,6 +262,7 @@ def compute_payments(
         paid_items=paid_items,
         prepay_items=prepay_items,
         project_expense_items=project_expense_items,
+        road_allowance_items=road_allowance_items,
         pending_items=pending_items,
         invalid_status_items=invalid_status_items,
         missing_fields=missing_fields,

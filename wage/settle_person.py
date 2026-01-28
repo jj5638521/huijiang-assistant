@@ -77,14 +77,21 @@ def _compute_pricing(
     group_no_days = len(attendance.date_sets["全组｜未出勤"])
     single_yes_days = len(attendance.date_sets["单防撞｜出勤"])
     single_no_days = len(attendance.date_sets["单防撞｜未出勤"])
+    road_raw_total = sum(
+        (item.amount for item in payment.road_allowance_items), Decimal("0")
+    )
 
     wage_group = daily_group * Decimal(group_yes_days)
     wage_single_yes = single_yes * Decimal(single_yes_days)
     wage_single_no = single_no * Decimal(single_no_days)
     wage_total = wage_group + wage_single_yes + wage_single_no
 
-    meal_total = Decimal("0")
-    travel_total = Decimal("0")
+    meal_total = Decimal("25") * Decimal(group_yes_days) + Decimal("40") * Decimal(
+        group_no_days
+    )
+    travel_total = (
+        min(Decimal("200"), road_raw_total) if project_ended else Decimal("0")
+    )
 
     paid_total = payment.paid_total
     prepay_total = payment.prepay_total
@@ -298,6 +305,9 @@ def settle_person(
     group_no_days = len(attendance.date_sets["全组｜未出勤"])
     single_yes_days = len(attendance.date_sets["单防撞｜出勤"])
     single_no_days = len(attendance.date_sets["单防撞｜未出勤"])
+    road_raw_total = sum(
+        (item.amount for item in payment.road_allowance_items), Decimal("0")
+    )
 
     pending_total = len(payment.pending_items) + len(payment.missing_amount_candidates)
     pending_reasons: dict[str, int] = {}
@@ -328,8 +338,16 @@ def settle_person(
             f"{_format_decimal(pricing.wage_single_yes + pricing.wage_single_no)}"
         ),
         f"- 工资合计：{_format_decimal(pricing.wage_total)}",
-        f"- 餐补：{_format_decimal(pricing.meal_total)}（当前口径=0）",
-        f"- 路补：{_format_decimal(pricing.travel_total)}（当前口径=0，项目已结束={'是' if project_ended else '否'}）",
+        (
+            f"- 餐补：25×{group_yes_days} + 40×{group_no_days}="
+            f"{_format_decimal(pricing.meal_total)}"
+        ),
+        (
+            f"- 路补：min(200, 路补有效金额合计{_format_decimal(road_raw_total)})="
+            f"{_format_decimal(pricing.travel_total)}"
+            if project_ended
+            else f"- 路补：{_format_decimal(pricing.travel_total)}（项目已结束=否）"
+        ),
         "3）已付/预支明细：",
     ]
 
@@ -363,7 +381,7 @@ def settle_person(
             for item in differences:
                 detail_lines.append(f"- {item}")
     detail_lines.append("6）备注与校核摘要：")
-    detail_lines.append("餐补口径：25×施工天 + 40×未施工天（当前口径=0）")
+    detail_lines.append("餐补口径：25×施工天 + 40×未施工天")
     detail_lines.append("二管道隔离：工资结算与支付流水分账核算")
     detail_lines.append(f"单防撞命中：{len(attendance.fangzhuang_hits)}条")
     detail_lines.append("7）校核摘要：")
@@ -421,6 +439,9 @@ def settle_person(
             "paid_items": _serialize_payment_items(payment.paid_items),
             "prepay_items": _serialize_payment_items(payment.prepay_items),
             "project_expense_items": _serialize_payment_items(payment.project_expense_items),
+            "road_allowance_items": _serialize_payment_items(
+                payment.road_allowance_items
+            ),
             "pending_items": _serialize_payment_items(payment.pending_items),
             "missing_amount_candidates": payment.missing_amount_candidates,
             "invalid_status_items": _serialize_payment_items(payment.invalid_status_items),

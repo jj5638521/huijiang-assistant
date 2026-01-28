@@ -20,7 +20,21 @@ CANDIDATE_CATEGORY_HEADERS = ["报销类型", "费用类型", "类型", "类别"
 CANDIDATE_STATUS_HEADERS = ["报销状态", "状态", "付款状态"]
 CANDIDATE_RESULT_HEADERS = ["报销结果", "审核结果", "审批结果", "结果"]
 CANDIDATE_VOUCHER_HEADERS = ["凭证号", "上传凭证", "票据号", "流水号", "订单号"]
-CANDIDATE_REMARK_HEADERS = ["备注", "用途", "说明"]
+
+ATTENDANCE_WORK_HEADERS = [
+    "是否施工",
+    "今天是否施工",
+    "是否施工?",
+    "是否施工？",
+]
+ATTENDANCE_DATE_HEADERS = ["施工日期"]
+ATTENDANCE_NAME_HEADERS = [
+    "施工人员",
+    "实际出勤人员",
+    "实际施工人员",
+    "出勤人员",
+    "实际人员",
+]
 
 STATUS_WHITELIST = {
     "已支付",
@@ -112,16 +126,45 @@ def is_payment_candidate(row: Mapping[str, str]) -> bool:
     for header in CANDIDATE_AMOUNT_HEADERS:
         if _clean_amount_text(row.get(header, "")):
             return True
-    for header_group in (
-        CANDIDATE_CATEGORY_HEADERS,
-        CANDIDATE_STATUS_HEADERS,
-        CANDIDATE_RESULT_HEADERS,
-        CANDIDATE_VOUCHER_HEADERS,
-        CANDIDATE_REMARK_HEADERS,
-    ):
-        for header in header_group:
-            if row.get(header, "").strip():
-                return True
+    for header in CANDIDATE_VOUCHER_HEADERS:
+        if row.get(header, "").strip():
+            return True
+    for header in CANDIDATE_CATEGORY_HEADERS:
+        if row.get(header, "").strip():
+            return True
+    for header in CANDIDATE_STATUS_HEADERS:
+        if row.get(header, "").strip():
+            return True
+    for header in CANDIDATE_RESULT_HEADERS:
+        if row.get(header, "").strip():
+            return True
+    return False
+
+
+def _find_attendance_work_header(headers: set[str]) -> str | None:
+    work_key = _find_header(headers, ATTENDANCE_WORK_HEADERS)
+    if work_key is None:
+        for header in headers:
+            if "是否施工" in header:
+                return header
+    return work_key
+
+
+def _is_attendance_row(
+    row: Mapping[str, str],
+    work_key: str | None,
+    date_key: str | None,
+    name_key: str | None,
+) -> bool:
+    if work_key:
+        work_value = row.get(work_key, "").strip()
+        if work_value:
+            return True
+    if date_key and name_key:
+        date_value = row.get(date_key, "").strip()
+        name_value = row.get(name_key, "").strip()
+        if date_value and name_value:
+            return True
     return False
 
 
@@ -160,6 +203,9 @@ def compute_payments(
     project_key = _find_header(headers, PROJECT_HEADERS)
     voucher_key = _find_header(headers, VOUCHER_HEADERS)
     remark_key = _find_header(headers, REMARK_HEADERS)
+    attendance_work_key = _find_attendance_work_header(headers)
+    attendance_date_key = _find_header(headers, ATTENDANCE_DATE_HEADERS)
+    attendance_name_key = _find_header(headers, ATTENDANCE_NAME_HEADERS)
 
     missing_fields = []
     for key, label in (
@@ -191,6 +237,13 @@ def compute_payments(
     rejected_result_items: list[PaymentItem] = []
 
     for index, row in enumerate(rows, start=1):
+        if _is_attendance_row(
+            row,
+            attendance_work_key,
+            attendance_date_key,
+            attendance_name_key,
+        ):
+            continue
         if not is_payment_candidate(row):
             continue
         if None in (date_key, amount_key, status_key, type_key, name_key):
@@ -314,10 +367,20 @@ def collect_payment_people(
     headers = {key.strip() for row in rows for key in row.keys()}
     name_key = _find_header(headers, NAME_HEADERS)
     project_key = _find_header(headers, PROJECT_HEADERS)
+    attendance_work_key = _find_attendance_work_header(headers)
+    attendance_date_key = _find_header(headers, ATTENDANCE_DATE_HEADERS)
+    attendance_name_key = _find_header(headers, ATTENDANCE_NAME_HEADERS)
     if name_key is None:
         return set()
     people: set[str] = set()
     for row in rows:
+        if _is_attendance_row(
+            row,
+            attendance_work_key,
+            attendance_date_key,
+            attendance_name_key,
+        ):
+            continue
         if not is_payment_candidate(row):
             continue
         name_value = row.get(name_key, "").strip()

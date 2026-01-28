@@ -249,30 +249,53 @@ def main() -> int:
     attendance_rows = _read_csv(selected[0])
     payment_rows = _read_csv(selected[1])
 
-    command = parse_command(command_text)
-    if command.get("mode") == "project":
-        from . import demo_settle_project
+    lines = [line.strip() for line in command_text.splitlines() if line.strip()]
+    wage_lines = [line for line in lines if line.startswith("工资：")]
+    global_lines = [line for line in lines if not line.startswith("工资：")]
 
-        return demo_settle_project.main()
-    if not command.get("project_name"):
-        command["project_name"] = _derive_project_name(selected[0])
+    def _run_single(command_source: str) -> int:
+        command = parse_command(command_source)
+        if command.get("mode") == "project":
+            from . import demo_settle_project
 
-    runtime_overrides = dict(command.get("runtime_overrides") or {})
-    config_path = data_dir / "当前" / "配置.txt"
-    runtime_overrides.update(_read_runtime_overrides(config_path))
-    runtime_overrides["attendance_source"] = selected[0].name
-    runtime_overrides["payment_source"] = selected[1].name
+            return demo_settle_project.main()
+        if not command.get("project_name"):
+            command["project_name"] = _derive_project_name(selected[0])
 
-    output = settle_person(
-        attendance_rows,
-        payment_rows,
-        person_name=command.get("person_name"),
-        role=command.get("role"),
-        project_ended=command.get("project_ended"),
-        project_name=command.get("project_name"),
-        runtime_overrides=runtime_overrides,
-    )
-    print(output)
+        runtime_overrides = dict(command.get("runtime_overrides") or {})
+        config_path = data_dir / "当前" / "配置.txt"
+        runtime_overrides.update(_read_runtime_overrides(config_path))
+        runtime_overrides["attendance_source"] = selected[0].name
+        runtime_overrides["payment_source"] = selected[1].name
+
+        output = settle_person(
+            attendance_rows,
+            payment_rows,
+            person_name=command.get("person_name"),
+            role=command.get("role"),
+            project_ended=command.get("project_ended"),
+            project_name=command.get("project_name"),
+            runtime_overrides=runtime_overrides,
+        )
+        print(output)
+        return 0
+
+    if len(wage_lines) <= 1:
+        return _run_single(command_text)
+
+    temp_path = data_dir / "当前" / "._口令_单人临时.txt"
+    try:
+        for index, wage_line in enumerate(wage_lines):
+            temp_content = "\n".join(global_lines + [wage_line])
+            temp_path.write_text(temp_content, encoding="utf-8")
+            temp_command_text = _read_command_file(temp_path)
+            if temp_command_text:
+                _run_single(temp_command_text)
+            if index != len(wage_lines) - 1:
+                print()
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
     return 0
 
 

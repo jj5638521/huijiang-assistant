@@ -12,6 +12,7 @@ TYPE_HEADERS = ["报销类型", "费用类型", "类别", "类型"]
 NAME_HEADERS = ["报销人员", "姓名", "收款人", "人员"]
 PROJECT_HEADERS = ["项目", "项目名称"]
 VOUCHER_HEADERS = ["上传凭证", "凭证号", "凭证"]
+REMARK_HEADERS = ["备注", "说明", "报销备注"]
 
 STATUS_WHITELIST = {
     "已支付",
@@ -69,7 +70,15 @@ def _find_header(headers: set[str], candidates: list[str]) -> str | None:
 
 
 def _parse_amount(value: str) -> Decimal | None:
-    cleaned = value.replace(",", "").replace("¥", "").strip()
+    cleaned = (
+        value.replace(",", "")
+        .replace("¥", "")
+        .replace("￥", "")
+        .replace("元", "")
+        .replace(" ", "")
+        .replace("\u00a0", "")
+        .strip()
+    )
     if not cleaned:
         return None
     try:
@@ -109,6 +118,7 @@ def compute_payments(
     name_key = _find_header(headers, NAME_HEADERS)
     project_key = _find_header(headers, PROJECT_HEADERS)
     voucher_key = _find_header(headers, VOUCHER_HEADERS)
+    remark_key = _find_header(headers, REMARK_HEADERS)
 
     missing_fields = []
     for key, label in (
@@ -134,20 +144,35 @@ def compute_payments(
     pending_items: list[PaymentItem] = []
     invalid_status_items: list[PaymentItem] = []
 
-    for row in rows:
+    for index, row in enumerate(rows, start=1):
         if None in (date_key, amount_key, status_key, type_key, name_key):
             continue
         date_value = _normalize_date(row.get(date_key, ""))
         amount_raw = row.get(amount_key, "")
-        amount = _parse_amount(amount_raw)
-        if amount is None:
-            invalid_amounts.append(amount_raw)
-            continue
         status_value = row.get(status_key, "").strip()
         type_value = row.get(type_key, "").strip()
         name_value = row.get(name_key, "").strip()
         project_value = row.get(project_key, "").strip() if project_key else ""
         voucher_value = row.get(voucher_key, "").strip() if voucher_key else ""
+        remark_value = row.get(remark_key, "").strip() if remark_key else ""
+
+        suspected_payment = any(
+            value
+            for value in (
+                amount_raw.strip(),
+                status_value,
+                type_value,
+                voucher_value,
+                remark_value,
+            )
+        )
+        if not suspected_payment:
+            continue
+
+        amount = _parse_amount(amount_raw)
+        if amount is None:
+            invalid_amounts.append(f"第{index}行 金额='{amount_raw}'")
+            continue
 
         if target_person and name_value and name_value != target_person:
             continue

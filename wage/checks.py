@@ -103,7 +103,11 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     checks.append(_check("F", "模式不混合", mode_ok, mode_detail))
 
     amount_ok = not payment.invalid_amounts
-    amount_detail = "OK" if amount_ok else "金额格式异常"
+    amount_detail = (
+        "OK"
+        if amount_ok
+        else "金额格式异常: " + "; ".join(payment.invalid_amounts)
+    )
     checks.append(_check("G", "金额数值化", amount_ok, amount_detail))
 
     date_sets_ok = context.get("date_sets_consistent", True)

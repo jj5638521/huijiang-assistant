@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,9 +13,14 @@ from wage.settle_person import settle_person
 ATTENDANCE_FIELDS = {
     "施工日期",
     "是否施工",
+    "今天是否施工",
+    "是否施工?",
+    "是否施工？",
     "出勤",
     "施工人员",
     "实际施工人员",
+    "实际出勤人员",
+    "实际人员",
     "工作日期",
     "日期",
 }
@@ -37,6 +43,10 @@ COMMON_SUFFIXES = [
     "支付表",
     "付款表",
     "支付记录",
+    "_数据表_数据",
+    "_表格",
+    "_问卷",
+    "_收集结果",
 ]
 
 
@@ -194,6 +204,7 @@ def _read_command_file(command_path: Path) -> str | None:
 
 def _derive_project_name(path: Path) -> str:
     name = path.stem
+    name = re.sub(r"(\s*\(\d+\)|\s*（\d+）)$", "", name)
     for suffix in COMMON_SUFFIXES:
         if name.endswith(suffix):
             name = name[: -len(suffix)]

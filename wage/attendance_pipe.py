@@ -1,13 +1,21 @@
 """Attendance pipeline for wage settlement."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterable, Mapping
 
 DATE_HEADERS = ["日期", "施工日期", "工作日期", "出勤日期"]
-NAME_HEADERS = ["姓名", "施工人员", "实际施工人员", "出勤人员"]
-WORK_HEADERS = ["是否施工", "出勤", "施工"]
+NAME_HEADERS = [
+    "姓名",
+    "施工人员",
+    "实际施工人员",
+    "出勤人员",
+    "实际出勤人员",
+    "实际人员",
+]
+WORK_HEADERS = ["是否施工", "出勤", "施工", "今天是否施工", "是否施工?", "是否施工？"]
 VEHICLE_HEADERS = ["车辆", "车辆信息", "车牌"]
 PROJECT_HEADERS = ["项目", "项目名称"]
 
@@ -67,6 +75,14 @@ def _is_work(value: str) -> bool:
     return text in {"是", "施工", "出勤", "1", "Y", "y", "有"}
 
 
+def _split_names(raw: str) -> list[str]:
+    cleaned = raw.strip()
+    if not cleaned:
+        return []
+    parts = [part for part in re.split(r"[、，,\s]+", cleaned) if part]
+    return parts or [cleaned]
+
+
 def compute_attendance(
     attendance_rows: Iterable[Mapping[str, str]],
     project_name: str | None,
@@ -77,6 +93,11 @@ def compute_attendance(
     date_key = _find_header(headers, DATE_HEADERS)
     name_key = _find_header(headers, NAME_HEADERS)
     work_key = _find_header(headers, WORK_HEADERS)
+    if work_key is None:
+        for header in headers:
+            if "是否施工" in header:
+                work_key = header
+                break
     vehicle_key = _find_header(headers, VEHICLE_HEADERS)
     project_key = _find_header(headers, PROJECT_HEADERS)
 
@@ -106,7 +127,8 @@ def compute_attendance(
         date_value = row.get(date_key, "")
         parsed_date, raw_date = _parse_date(date_value)
         if parsed_date is None:
-            invalid_dates.append(date_value)
+            if date_value.strip():
+                invalid_dates.append(date_value)
             continue
         if raw_date:
             normalization_logs.append(
@@ -115,35 +137,42 @@ def compute_attendance(
         name_value = row.get(name_key, "").strip()
         if not name_value:
             continue
+        name_list = _split_names(name_value)
+        if len(name_list) > 1:
+            normalization_logs.append(
+                f"姓名拆分: '{name_value}' -> '{'、'.join(name_list)}'"
+            )
         work_value = row.get(work_key, "")
         is_work = _is_work(work_value)
         vehicle_value = row.get(vehicle_key, "").strip() if vehicle_key else ""
         if vehicle_value and "防撞" in vehicle_value:
-            fangzhuang_hits.append(f"{name_value}@{parsed_date}:{vehicle_value}")
+            for name in name_list:
+                fangzhuang_hits.append(f"{name}@{parsed_date}:{vehicle_value}")
         raw_project = row.get(project_key, "").strip() if project_key else ""
-        if project_name and raw_project and raw_project != project_name:
-            project_mismatches.append(f"{name_value}@{parsed_date}: {raw_project}")
+        for name in name_list:
+            if project_name and raw_project and raw_project != project_name:
+                project_mismatches.append(f"{name}@{parsed_date}: {raw_project}")
 
-        key = (name_value, parsed_date)
-        if key in person_day_status:
-            if person_day_status[key] is False and is_work is True:
-                person_day_status[key] = True
-                conflict_logs.append(
-                    f"同日冲突: {name_value} {parsed_date} 未施工->施工 (施工优先)"
-                )
-                auto_corrections.append(
-                    f"冲突消解: {name_value} {parsed_date} 按施工优先"
-                )
-            elif person_day_status[key] is True and is_work is False:
-                conflict_logs.append(
-                    f"同日冲突: {name_value} {parsed_date} 施工保持"
-                )
-            continue
-        person_day_status[key] = is_work
+            key = (name, parsed_date)
+            if key in person_day_status:
+                if person_day_status[key] is False and is_work is True:
+                    person_day_status[key] = True
+                    conflict_logs.append(
+                        f"同日冲突: {name} {parsed_date} 未施工->施工 (施工优先)"
+                    )
+                    auto_corrections.append(
+                        f"冲突消解: {name} {parsed_date} 按施工优先"
+                    )
+                elif person_day_status[key] is True and is_work is False:
+                    conflict_logs.append(
+                        f"同日冲突: {name} {parsed_date} 施工保持"
+                    )
+                continue
+            person_day_status[key] = is_work
 
-        day_people_any.setdefault(parsed_date, set()).add(name_value)
-        if is_work:
-            day_people_working.setdefault(parsed_date, set()).add(name_value)
+            day_people_any.setdefault(parsed_date, set()).add(name)
+            if is_work:
+                day_people_working.setdefault(parsed_date, set()).add(name)
 
     mode_by_date: dict[str, str] = {}
     for date in sorted(day_people_any.keys()):

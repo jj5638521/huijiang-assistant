@@ -30,6 +30,32 @@ def _payment_rows() -> list[dict[str, str]]:
     ]
 
 
+def _attendance_rows_for_allowances() -> list[dict[str, str]]:
+    return [
+        {"日期": "2025-11-05", "姓名": "王怀宇", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-05", "姓名": "张三", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-05", "姓名": "李四", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-06", "姓名": "王怀宇", "是否施工": "否", "车辆": "防撞车"},
+        {"日期": "2025-11-06", "姓名": "张三", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-06", "姓名": "李四", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-06", "姓名": "赵五", "是否施工": "是", "车辆": "防撞车"},
+    ]
+
+
+def _payment_rows_for_allowances() -> list[dict[str, str]]:
+    return [
+        {
+            "报销日期": "2025-11-07",
+            "报销金额": "350",
+            "报销状态": "已支付",
+            "报销类型": "路补",
+            "报销人员": "王怀宇",
+            "项目": "测试项目",
+            "上传凭证": "V100",
+        }
+    ]
+
+
 def test_settle_person_outputs_two_segments() -> None:
     version = get_ruleset_version()
     output = settle_person(
@@ -63,3 +89,43 @@ def test_settle_person_blocking_report() -> None:
 
     assert output.startswith("【阻断｜工资结算】")
     assert "【详细版（给杰对账）】" not in output
+
+
+def test_settle_person_allowances_enabled() -> None:
+    output = settle_person(
+        _attendance_rows_for_allowances(),
+        _payment_rows_for_allowances(),
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+
+    assert "餐补：25×1 + 40×1=65" in output
+    assert "路补：min(200, 路补有效金额合计350)=200" in output
+
+
+def test_settle_person_no_road_allowance_when_missing() -> None:
+    payment_rows = [
+        {
+            "报销日期": "",
+            "报销金额": "",
+            "报销状态": "",
+            "报销类型": "",
+            "报销人员": "",
+            "项目": "",
+            "上传凭证": "",
+        }
+    ]
+    output = settle_person(
+        _attendance_rows_for_allowances(),
+        payment_rows,
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+
+    assert "路补：min(200, 路补有效金额合计0)=0" in output

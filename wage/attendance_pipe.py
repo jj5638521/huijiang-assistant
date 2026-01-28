@@ -194,8 +194,16 @@ def compute_attendance(
     }
 
     if target_person:
-        for date, mode in mode_by_date.items():
-            worked = person_day_status.get((target_person, date), False)
+        person_dates = sorted(
+            {
+                date
+                for (name, date), _ in person_day_status.items()
+                if name == target_person
+            }
+        )
+        for date in person_dates:
+            mode = mode_by_date.get(date, "全组")
+            worked = person_day_status[(target_person, date)]
             if mode == "单防撞":
                 if worked:
                     date_sets["单防撞｜出勤"].append(date)

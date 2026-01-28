@@ -241,3 +241,19 @@ def test_settle_person_compact_can_show_logs_when_enabled() -> None:
     detailed, compressed = output.split("\n\n")
     assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", detailed)
     assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", compressed)
+
+
+def test_settle_person_detail_can_hide_logs_when_disabled() -> None:
+    output = settle_person(
+        _attendance_rows(),
+        _payment_rows(),
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={"show_logs_in_detail": 0},
+    )
+
+    detailed, compressed = output.split("\n\n")
+    assert "日志：logs/" not in detailed
+    assert "日志：logs/" not in compressed

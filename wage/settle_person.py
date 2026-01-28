@@ -437,9 +437,15 @@ def settle_person(
 
     pending_total = len(payment.pending_items) + len(payment.missing_amount_candidates)
     pending_reasons: dict[str, int] = {}
+    if payment.missing_status_items:
+        pending_reasons["状态缺失"] = len(payment.missing_status_items)
     if payment.invalid_status_items:
         pending_reasons["状态无效"] = len(payment.invalid_status_items)
-    pending_other = len(payment.pending_items) - len(payment.invalid_status_items)
+    pending_other = (
+        len(payment.pending_items)
+        - len(payment.invalid_status_items)
+        - len(payment.missing_status_items)
+    )
     if pending_other:
         pending_reasons["类别待确认"] = pending_other
     if payment.missing_amount_candidates:
@@ -484,13 +490,13 @@ def settle_person(
     if verbose:
         detail_lines.extend(_render_payment_items("- 已付明细", payment.paid_items))
         detail_lines.extend(_render_payment_items("- 预支明细", payment.prepay_items))
-    if verbose and pending_total:
+    if pending_total:
         pending_summary = "，".join(
             f"{reason}{count}条" for reason, count in pending_reasons.items()
         )
         detail_lines.append(f"待确认汇总：{pending_summary}")
     next_section = 4
-    if pending_total:
+    if pending_total and verbose:
         detail_lines.append(f"{next_section}）待确认清单：")
         detail_lines.extend(_render_pending_items("- 待确认明细", payment.pending_items))
         if payment.missing_amount_candidates:
@@ -624,6 +630,7 @@ def settle_person(
             ),
             "pending_items": _serialize_payment_items(payment.pending_items),
             "missing_amount_candidates": payment.missing_amount_candidates,
+            "missing_status_items": _serialize_payment_items(payment.missing_status_items),
             "invalid_status_items": _serialize_payment_items(payment.invalid_status_items),
             "pending_items_count": str(pending_total),
             "missing_fields": payment.missing_fields,

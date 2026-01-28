@@ -233,6 +233,10 @@ def main() -> int:
     if not command.get("project_name"):
         command["project_name"] = _derive_project_name(selected[0])
 
+    runtime_overrides = dict(command.get("runtime_overrides") or {})
+    runtime_overrides["attendance_source"] = selected[0].name
+    runtime_overrides["payment_source"] = selected[1].name
+
     output = settle_person(
         attendance_rows,
         payment_rows,
@@ -240,7 +244,7 @@ def main() -> int:
         role=command.get("role"),
         project_ended=command.get("project_ended"),
         project_name=command.get("project_name"),
-        runtime_overrides=command.get("runtime_overrides"),
+        runtime_overrides=runtime_overrides,
     )
     print(output)
     return 0

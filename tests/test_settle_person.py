@@ -73,7 +73,9 @@ def test_settle_person_outputs_two_segments() -> None:
     assert f"计算口径版本 {version}｜阻断模式：Hard" in output
     assert f"- 规则版本: 计算口径版本 {version}｜阻断模式：Hard" in output
     assert "待确认明细" not in output
-    assert "日期（模式→出勤）" not in output
+    detailed, compressed = output.split("\n\n")
+    assert "日期（模式→出勤）" in compressed
+    assert "2025-11：" in compressed
 
 
 def test_settle_person_blocking_report() -> None:
@@ -103,7 +105,7 @@ def test_settle_person_allowances_enabled() -> None:
     )
 
     assert "餐补：25×1 + 40×1=65" in output
-    assert "路补：min(200, 路补有效金额合计350)=200" in output
+    assert "路补：200" in output
 
 
 def test_settle_person_no_road_allowance_when_missing() -> None:
@@ -128,4 +130,4 @@ def test_settle_person_no_road_allowance_when_missing() -> None:
         runtime_overrides={},
     )
 
-    assert "路补：min(200, 路补有效金额合计0)=0" in output
+    assert "路补：0" in output

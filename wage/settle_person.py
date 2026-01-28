@@ -65,6 +65,70 @@ def _build_date_list(dates: list[str]) -> str:
     return "、".join(dates) if dates else "无"
 
 
+def _format_dates_by_month(dates: list[str]) -> str:
+    if not dates:
+        return "无"
+    month_map: dict[str, list[str]] = {}
+    for date in sorted(dates):
+        parts = date.split("-")
+        if len(parts) >= 3:
+            month = "-".join(parts[:2])
+            day = parts[2]
+            if day.isdigit():
+                day = str(int(day))
+            month_map.setdefault(month, []).append(day)
+        else:
+            month_map.setdefault("未知", []).append(date)
+    return "；".join(f"{month}：{'、'.join(days)}" for month, days in month_map.items())
+
+
+def _render_mode_dates(
+    date_sets: dict[str, list[str]],
+    *,
+    bullet: str,
+    indent: str,
+) -> list[str]:
+    order = [
+        ("全组｜出勤", "全组｜出勤"),
+        ("全组｜未出勤", "全组｜未出勤"),
+        ("单防撞｜出勤", "单防撞｜出勤"),
+        ("单防撞｜未出勤", "单防撞｜未出勤"),
+    ]
+    lines: list[str] = ["日期（模式→出勤）"]
+    for key, label in order:
+        dates = date_sets.get(key, [])
+        if not dates:
+            continue
+        lines.append(
+            f"{indent}{bullet}{label}（{len(dates)}天）：{_format_dates_by_month(dates)}"
+        )
+    return lines
+
+
+def _format_source(attendance_source: str | None, payment_source: str | None) -> str:
+    if attendance_source and payment_source:
+        if attendance_source == payment_source:
+            return f"来源：{attendance_source}"
+        return f"来源：出勤/{attendance_source}｜报销/{payment_source}"
+    if attendance_source:
+        return f"来源：{attendance_source}"
+    if payment_source:
+        return f"来源：{payment_source}"
+    return "来源：未知"
+
+
+def _resolve_road_passphrase(
+    project_ended: bool | None, road_raw_total: Decimal, override: str | None
+) -> str:
+    if override:
+        return override
+    if project_ended is False:
+        return "不计算路补"
+    if road_raw_total == 0:
+        return "无路补"
+    return "有路补"
+
+
 def _compute_pricing(
     attendance: AttendanceResult,
     payment: PaymentResult,
@@ -308,6 +372,18 @@ def settle_person(
     road_raw_total = sum(
         (item.amount for item in payment.road_allowance_items), Decimal("0")
     )
+    project_ended_label = (
+        "是" if project_ended is True else "否" if project_ended is False else "未知"
+    )
+    road_passphrase = _resolve_road_passphrase(
+        project_ended,
+        road_raw_total,
+        runtime_overrides.get("road_passphrase"),
+    )
+    source_line = _format_source(
+        runtime_overrides.get("attendance_source"),
+        runtime_overrides.get("payment_source"),
+    )
 
     pending_total = len(payment.pending_items) + len(payment.missing_amount_candidates)
     pending_reasons: dict[str, int] = {}
@@ -322,44 +398,43 @@ def settle_person(
     detail_lines = [
         "【详细版（给杰对账）】",
         f"{project_name or '项目未识别'}｜工资结算（{person_name or '未知'}｜{role or '未标注'}）",
+        f"项目已结束：{project_ended_label}｜路补口令：{road_passphrase}",
         "1）出勤与模式：",
-        f"- 单防撞出勤 {single_yes_days} 天：{_build_date_list(attendance.date_sets['单防撞｜出勤'])}",
-        f"- 单防撞未出勤 {single_no_days} 天：{_build_date_list(attendance.date_sets['单防撞｜未出勤'])}",
-        f"- 全组出勤 {group_yes_days} 天：{_build_date_list(attendance.date_sets['全组｜出勤'])}",
-        f"- 全组未出勤 {group_no_days} 天：{_build_date_list(attendance.date_sets['全组｜未出勤'])}",
+        f"    • 单防撞出勤 {single_yes_days} 天："
+        f"{_build_date_list(attendance.date_sets['单防撞｜出勤'])}",
+        f"    • 单防撞未出勤 {single_no_days} 天："
+        f"{_build_date_list(attendance.date_sets['单防撞｜未出勤'])}",
+        f"    • 全组出勤 {group_yes_days} 天："
+        f"{_build_date_list(attendance.date_sets['全组｜出勤'])}",
+        f"    • 全组未出勤 {group_no_days} 天："
+        f"{_build_date_list(attendance.date_sets['全组｜未出勤'])}",
         "2）金额与公式：",
         (
-            f"- 全组工资：{_format_decimal(daily_group)}×{group_yes_days}="
+            f"    • 全组工资：{_format_decimal(daily_group)}×{group_yes_days}="
             f"{_format_decimal(pricing.wage_group)}"
         ),
         (
-            f"- 单防撞工资：{_format_decimal(single_yes)}×{single_yes_days} + "
+            f"    • 单防撞工资：{_format_decimal(single_yes)}×{single_yes_days} + "
             f"{_format_decimal(single_no)}×{single_no_days}="
             f"{_format_decimal(pricing.wage_single_yes + pricing.wage_single_no)}"
         ),
-        f"- 工资合计：{_format_decimal(pricing.wage_total)}",
+        f"    • 工资合计：{_format_decimal(pricing.wage_total)}",
         (
-            f"- 餐补：25×{group_yes_days} + 40×{group_no_days}="
+            f"    • 餐补：25×{group_yes_days} + 40×{group_no_days}="
             f"{_format_decimal(pricing.meal_total)}"
         ),
-        (
-            f"- 路补：min(200, 路补有效金额合计{_format_decimal(road_raw_total)})="
-            f"{_format_decimal(pricing.travel_total)}"
-            if project_ended
-            else f"- 路补：{_format_decimal(pricing.travel_total)}（项目已结束=否）"
-        ),
+        f"    • 路补：{_format_decimal(pricing.travel_total)}",
         "3）已付/预支明细：",
     ]
 
     detail_lines.append(
-        f"- 已付合计：{_format_decimal(pricing.paid_total)}｜预支合计：{_format_decimal(pricing.prepay_total)}"
+        f"    • 已付合计：{_format_decimal(pricing.paid_total)}｜"
+        f"预支合计：{_format_decimal(pricing.prepay_total)}"
     )
     if verbose:
         detail_lines.extend(_render_payment_items("- 已付明细", payment.paid_items))
         detail_lines.extend(_render_payment_items("- 预支明细", payment.prepay_items))
-    else:
-        detail_lines.append(f"- 明细详见 logs/{run_id}.json")
-    if pending_total:
+    if verbose and pending_total:
         pending_summary = "，".join(
             f"{reason}{count}条" for reason, count in pending_reasons.items()
         )
@@ -368,18 +443,25 @@ def settle_person(
         "4）应付：工资 + 餐补 + 路补 - 已付 - 预支"
         f" = {_format_decimal(pricing.payable)}"
     )
+    detail_lines.append(source_line)
+    detail_lines.append(VERSION_NOTE)
+    detail_lines.extend(
+        _render_mode_dates(
+            attendance.date_sets,
+            bullet="· ",
+            indent="",
+        )
+    )
     if pricing.payable < 0:
         detail_lines.append(
             f"【当期应付为负：员工需返还或下期冲减｜负值金额：¥{_format_decimal(-pricing.payable)}】"
         )
     detail_lines.append("5）差异清单：")
     if differences == ["无"]:
-        detail_lines.append("- 无")
+        detail_lines.append("    • 无")
     else:
-        detail_lines.append(f"- 共{len(differences)}条，详见 logs/{run_id}.json")
-        if verbose:
-            for item in differences:
-                detail_lines.append(f"- {item}")
+        for item in differences:
+            detail_lines.append(f"    • {item}")
     detail_lines.append("6）备注与校核摘要：")
     detail_lines.append("餐补口径：25×施工天 + 40×未施工天")
     detail_lines.append("二管道隔离：工资结算与支付流水分账核算")
@@ -391,24 +473,27 @@ def settle_person(
     detail_lines.append(f"- 规则版本: {VERSION_NOTE}")
     detail_lines.append(f"- input_hash: {input_hash}")
     detail_lines.append("- output_hash: __OUTPUT_HASH__ (不含hash行)")
-    detail_lines.append(VERSION_NOTE)
-
     compressed_lines = ["【压缩版（发员工）】"]
-    if pricing.wage_total != 0:
-        compressed_lines.append(
-            f"工资：{_format_decimal(pricing.wage_total)}"
-            f"（全组{group_yes_days}天 + 单防撞{single_yes_days}天）"
-        )
+    single_suffix = f" + 单防撞{single_yes_days}天" if single_yes_days > 0 else ""
+    compressed_lines.append(
+        f"工资：{_format_decimal(pricing.wage_total)}"
+        f"（全组{group_yes_days}天{single_suffix}）"
+    )
     if pricing.meal_total != 0:
         compressed_lines.append(
             f"餐补：{_format_decimal(pricing.meal_total)}（仅全组参与）"
         )
     if pricing.travel_total != 0:
-        compressed_lines.append(
-            f"路补：{_format_decimal(pricing.travel_total)}（项目已结束={'是' if project_ended else '否'}）"
-        )
+        compressed_lines.append(f"路补：{_format_decimal(pricing.travel_total)}")
     compressed_lines.append(
         f"应付：{_format_decimal(pricing.payable)}"
+    )
+    compressed_lines.extend(
+        _render_mode_dates(
+            attendance.date_sets,
+            bullet="• ",
+            indent="    ",
+        )
     )
 
     detailed = "\n".join(detail_lines)

@@ -173,6 +173,21 @@ def _render_payment_items(title: str, items: list[object]) -> list[str]:
     return lines
 
 
+def _render_pending_items(title: str, items: list[object]) -> list[str]:
+    lines = [title]
+    if not items:
+        lines.append("- 无")
+        return lines
+    for item in items:
+        remark = item.remark or "-"
+        lines.append(
+            "- "
+            f"第{item.line_no}行｜{item.date}｜状态:{item.status or '-'}｜"
+            f"金额:{item.amount}｜凭证:{item.voucher or 'TEMP'}｜备注:{remark}"
+        )
+    return lines
+
+
 def _render_check_summary(checks: list[CheckResult]) -> str:
     parts = []
     for check in checks:
@@ -186,6 +201,7 @@ def _serialize_payment_items(items: list[object]) -> list[dict[str, str]]:
     for item in items:
         serialized.append(
             {
+                "line_no": str(item.line_no),
                 "date": item.date,
                 "name": item.name,
                 "project": item.project,
@@ -193,6 +209,7 @@ def _serialize_payment_items(items: list[object]) -> list[dict[str, str]]:
                 "category": item.category,
                 "status": item.status,
                 "voucher": item.voucher,
+                "remark": item.remark,
                 "raw_type": item.raw_type,
             }
         )
@@ -226,8 +243,6 @@ def _collect_invalid_items(attendance: AttendanceResult, payment: PaymentResult)
         items.append("项目字段不匹配")
     if payment.invalid_amounts:
         items.append(f"支付表金额格式异常: {'; '.join(payment.invalid_amounts)}")
-    if payment.invalid_status_items:
-        items.append("支付表存在无效状态")
     if payment.voucher_duplicates:
         items.append("凭证唯一性冲突")
     if payment.empty_voucher_duplicates:
@@ -245,8 +260,6 @@ def _collect_suggestions(attendance: AttendanceResult, payment: PaymentResult) -
         suggestions.append("统一日期格式为 YYYY-MM-DD")
     if payment.invalid_amounts:
         suggestions.append("金额请填写数字金额，可包含￥/元/逗号但勿含文字")
-    if payment.invalid_status_items:
-        suggestions.append("报销状态需在白名单内（如已支付/已报销/审核通过）")
     if payment.voucher_duplicates or payment.empty_voucher_duplicates:
         suggestions.append("确保凭证号唯一或补充凭证")
     if attendance.project_mismatches or payment.project_mismatches:
@@ -476,10 +489,19 @@ def settle_person(
             f"{reason}{count}条" for reason, count in pending_reasons.items()
         )
         detail_lines.append(f"待确认汇总：{pending_summary}")
+    next_section = 4
+    if pending_total:
+        detail_lines.append(f"{next_section}）待确认清单：")
+        detail_lines.extend(_render_pending_items("- 待确认明细", payment.pending_items))
+        if payment.missing_amount_candidates:
+            for item in payment.missing_amount_candidates:
+                detail_lines.append(f"- 金额缺失候选：{item}")
+        next_section += 1
     detail_lines.append(
-        "4）应付：工资 + 餐补 + 路补 - 已付 - 预支"
+        f"{next_section}）应付：工资 + 餐补 + 路补 - 已付 - 预支"
         f" = {_format_decimal(pricing.payable)}"
     )
+    next_section += 1
     detail_lines.append(source_line)
     detail_lines.append(VERSION_NOTE)
     detail_lines.extend(
@@ -493,22 +515,25 @@ def settle_person(
         detail_lines.append(
             f"【当期应付为负：员工需返还或下期冲减｜负值金额：¥{_format_decimal(-pricing.payable)}】"
         )
-    detail_lines.append("5）差异清单：")
+    detail_lines.append(f"{next_section}）差异清单：")
+    next_section += 1
     if not differences:
         detail_lines.append("    • 无")
     else:
         for item in differences:
             detail_lines.append(f"    • {item}")
     if show_notes:
-        detail_lines.append("6）备注与校核摘要：")
+        detail_lines.append(f"{next_section}）备注与校核摘要：")
         detail_lines.append("餐补口径：25×施工天 + 40×未施工天")
         detail_lines.append("二管道隔离：工资结算与支付流水分账核算")
         detail_lines.append(f"单防撞命中：{len(attendance.fangzhuang_hits)}条")
+        next_section += 1
     if show_checks:
-        detail_lines.append("7）校核摘要：")
+        detail_lines.append(f"{next_section}）校核摘要：")
         detail_lines.append(_render_check_summary(checks))
+        next_section += 1
     if show_audit:
-        detail_lines.append("8）审计留痕：")
+        detail_lines.append(f"{next_section}）审计留痕：")
         detail_lines.append(f"- run_id: {run_id}")
         detail_lines.append(f"- 规则版本: {VERSION_NOTE}")
         if verbose:
@@ -600,6 +625,7 @@ def settle_person(
             "pending_items": _serialize_payment_items(payment.pending_items),
             "missing_amount_candidates": payment.missing_amount_candidates,
             "invalid_status_items": _serialize_payment_items(payment.invalid_status_items),
+            "pending_items_count": str(pending_total),
             "missing_fields": payment.missing_fields,
             "invalid_amounts": payment.invalid_amounts,
             "project_mismatches": payment.project_mismatches,

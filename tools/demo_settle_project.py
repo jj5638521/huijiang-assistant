@@ -22,7 +22,7 @@ class PersonSummary:
     name: str
     output_text: str
     blocked: bool
-    pending: bool
+    pending_count: int
     blocking_codes: list[str]
     log_path: Path | None
 
@@ -65,14 +65,14 @@ def _extract_log_path(output: str) -> Path | None:
     return Path("logs") / match.group(1)
 
 
-def _load_pending_flag(log_path: Path | None) -> bool:
+def _load_pending_count(log_path: Path | None) -> int:
     if not log_path or not log_path.exists():
-        return False
+        return 0
     payload = json.loads(log_path.read_text(encoding="utf-8"))
     pending_summary = payload.get("pending_summary")
     if isinstance(pending_summary, dict):
-        return sum(pending_summary.values()) > 0
-    return False
+        return int(sum(pending_summary.values()))
+    return 0
 
 
 def _resolve_role(
@@ -114,7 +114,8 @@ def _render_summary(
     total = len(people)
     blocked = sum(1 for person in people if person.blocked)
     success = total - blocked
-    pending = sum(1 for person in people if person.pending)
+    pending_people = sum(1 for person in people if person.pending_count > 0)
+    pending_items = sum(person.pending_count for person in people)
     if total != success + blocked:
         raise ValueError("汇总人数不一致")
 
@@ -124,8 +125,16 @@ def _render_summary(
         f"总人数：{total}",
         f"成功：{success}",
         f"阻断：{blocked}",
-        f"待确认：{pending}",
+        f"待确认人数：{pending_people}",
+        f"待确认条数：{pending_items}",
     ]
+
+    if pending_people:
+        lines.append("待确认明细：")
+        for person in people:
+            if person.pending_count <= 0:
+                continue
+            lines.append(f"- {person.name}: {person.pending_count}条")
 
     if blocked:
         lines.append("阻断原因列表：")
@@ -203,13 +212,13 @@ def settle_project(
 
         blocked = output_text.startswith("【阻断｜工资结算】")
         log_path = _extract_log_path(output_text)
-        pending = _load_pending_flag(log_path)
+        pending_count = _load_pending_count(log_path)
         person_summaries.append(
             PersonSummary(
                 name=name,
                 output_text=output_text,
                 blocked=blocked,
-                pending=pending,
+                pending_count=pending_count,
                 blocking_codes=_parse_blocking_codes(output_text) if blocked else [],
                 log_path=log_path,
             )

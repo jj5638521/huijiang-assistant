@@ -161,15 +161,11 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     )
     if payment.project_mismatches:
         schema_ok = False
-    if payment.invalid_status_items:
-        schema_ok = False
     schema_detail_parts: list[str] = []
     if attendance.invalid_dates:
         schema_detail_parts.append("日期格式异常")
     if attendance.project_mismatches or payment.project_mismatches:
         schema_detail_parts.append("项目不匹配")
-    if payment.invalid_status_items:
-        schema_detail_parts.append("状态无效")
     if payment.invalid_amounts:
         schema_detail_parts.append("金额格式异常")
     schema_detail = "OK" if schema_ok else ";".join(schema_detail_parts)

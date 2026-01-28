@@ -210,9 +210,12 @@ def _read_runtime_overrides(config_path: Path) -> dict[str, int]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        match = re.search(r"\bverbose\s*[:=]\s*(\d+)\b", stripped)
+        match = re.search(
+            r"\b(verbose|show_notes|show_checks|show_audit)\s*[:=]\s*(\d+)\b",
+            stripped,
+        )
         if match:
-            overrides["verbose"] = int(match.group(1))
+            overrides[match.group(1)] = int(match.group(2))
     return overrides
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -215,10 +216,10 @@ def _serialize_payment_items(items: list[object]) -> list[dict[str, str]]:
     return serialized
 
 
-def _write_log(run_id: str, payload: dict) -> None:
+def _write_log(log_filename: str, payload: dict) -> None:
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{run_id}.json"
+    log_path = log_dir / log_filename
     log_path.write_text(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
         encoding="utf-8",
@@ -270,6 +271,24 @@ def _collect_suggestions(attendance: AttendanceResult, payment: PaymentResult) -
     return suggestions
 
 
+def _generate_run_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def _build_log_filename(run_id: str, input_hash: str) -> str:
+    return f"{run_id}_{input_hash[:8]}.json"
+
+
+def _stable_output_source(output_text: str, *, run_id: str, log_filename: str) -> str:
+    stable = output_text.replace(f"- run_id: {run_id}", "- run_id: __RUN_ID__")
+    log_suffix = log_filename[len(run_id) :]
+    stable = stable.replace(
+        f"日志：logs/{log_filename}",
+        f"日志：logs/__RUN_ID__{log_suffix}",
+    )
+    return stable
+
+
 def settle_person(
     attendance_rows: Iterable[Mapping[str, str]],
     payment_rows: Iterable[Mapping[str, str]],
@@ -289,6 +308,9 @@ def settle_person(
     payment = compute_payments(payment_list, project_name, person_name)
 
     verbose = int(runtime_overrides.get("verbose", 0))
+    show_notes = int(runtime_overrides.get("show_notes", 1))
+    show_checks = int(runtime_overrides.get("show_checks", 1))
+    show_audit = int(runtime_overrides.get("show_audit", 1))
     daily_group = DAILY_WAGE_MAP.get(
         person_name or "",
         ROLE_WAGE_MAP.get(role or "", Decimal("0")),
@@ -312,7 +334,8 @@ def settle_person(
             "payment_rows": payment_list,
         }
     )
-    run_id = input_hash[:12]
+    run_id = _generate_run_id()
+    log_filename = _build_log_filename(run_id, input_hash)
 
     context = {
         "attendance": attendance,
@@ -344,11 +367,12 @@ def settle_person(
             invalid_items=invalid_items,
             suggestions=suggestions,
             include_hash=bool(verbose),
+            include_audit=bool(show_audit),
             output_hash_placeholder=OUTPUT_HASH_PLACEHOLDER,
         )
         output_text = report
-        if not verbose:
-            output_text = f"{output_text}\n日志：logs/{run_id}.json"
+        if not verbose and show_audit:
+            output_text = f"{output_text}\n日志：logs/{log_filename}"
         output_hash_source = (
             output_text.replace(
                 f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}", ""
@@ -356,7 +380,11 @@ def settle_person(
             if verbose
             else output_text
         )
-        output_hash = _hash_payload(output_hash_source)
+        output_hash = _hash_payload(
+            _stable_output_source(
+                output_hash_source, run_id=run_id, log_filename=log_filename
+            )
+        )
         if verbose:
             output_text = output_text.replace(OUTPUT_HASH_PLACEHOLDER, output_hash)
         log_payload = {
@@ -377,7 +405,7 @@ def settle_person(
             "invalid_items": invalid_items,
             "suggestions": suggestions,
         }
-        _write_log(run_id, log_payload)
+        _write_log(log_filename, log_payload)
         return output_text
 
     auto_logs = attendance.auto_corrections + attendance.normalization_logs
@@ -481,18 +509,21 @@ def settle_person(
     else:
         for item in differences:
             detail_lines.append(f"    • {item}")
-    detail_lines.append("6）备注与校核摘要：")
-    detail_lines.append("餐补口径：25×施工天 + 40×未施工天")
-    detail_lines.append("二管道隔离：工资结算与支付流水分账核算")
-    detail_lines.append(f"单防撞命中：{len(attendance.fangzhuang_hits)}条")
-    detail_lines.append("7）校核摘要：")
-    detail_lines.append(_render_check_summary(checks))
-    detail_lines.append("8）审计留痕：")
-    detail_lines.append(f"- run_id: {run_id}")
-    detail_lines.append(f"- 规则版本: {VERSION_NOTE}")
-    if verbose:
-        detail_lines.append(f"- input_hash: {input_hash}")
-        detail_lines.append(f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}")
+    if show_notes:
+        detail_lines.append("6）备注与校核摘要：")
+        detail_lines.append("餐补口径：25×施工天 + 40×未施工天")
+        detail_lines.append("二管道隔离：工资结算与支付流水分账核算")
+        detail_lines.append(f"单防撞命中：{len(attendance.fangzhuang_hits)}条")
+    if show_checks:
+        detail_lines.append("7）校核摘要：")
+        detail_lines.append(_render_check_summary(checks))
+    if show_audit:
+        detail_lines.append("8）审计留痕：")
+        detail_lines.append(f"- run_id: {run_id}")
+        detail_lines.append(f"- 规则版本: {VERSION_NOTE}")
+        if verbose:
+            detail_lines.append(f"- input_hash: {input_hash}")
+            detail_lines.append(f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}")
     compressed_lines = ["【压缩版（发员工）】"]
     single_suffix = f" + 单防撞{single_yes_days}天" if single_yes_days > 0 else ""
     compressed_lines.append(
@@ -519,8 +550,8 @@ def settle_person(
     detailed = "\n".join(detail_lines)
     compressed = "\n".join(compressed_lines)
     output_text = "\n\n".join([detailed, compressed])
-    if not verbose:
-        output_text = f"{output_text}\n日志：logs/{run_id}.json"
+    if not verbose and show_audit:
+        output_text = f"{output_text}\n日志：logs/{log_filename}"
     output_hash_source = (
         output_text.replace(
             f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}", ""
@@ -528,7 +559,11 @@ def settle_person(
         if verbose
         else output_text
     )
-    output_hash = _hash_payload(output_hash_source)
+    output_hash = _hash_payload(
+        _stable_output_source(
+            output_hash_source, run_id=run_id, log_filename=log_filename
+        )
+    )
     if verbose:
         output_text = output_text.replace(OUTPUT_HASH_PLACEHOLDER, output_hash)
     log_payload = {
@@ -588,6 +623,6 @@ def settle_person(
             for check in checks
         ],
     }
-    _write_log(run_id, log_payload)
+    _write_log(log_filename, log_payload)
 
     return output_text

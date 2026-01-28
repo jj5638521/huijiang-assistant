@@ -1,3 +1,5 @@
+import re
+
 from wage.ruleset import get_ruleset_version
 from wage.settle_person import settle_person
 
@@ -77,7 +79,7 @@ def test_settle_person_outputs_two_segments() -> None:
     detailed, compressed = output.split("\n\n")
     assert "日期（模式→出勤）" in compressed
     assert "2025-11：" in compressed
-    assert "日志：logs/" in output
+    assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", output)
 
 
 def test_settle_person_blocking_report() -> None:
@@ -174,3 +176,45 @@ def test_settle_person_verbose_includes_audit_and_cleaning_logs() -> None:
     assert "日期格式标准化" in output
     assert "input_hash" in output
     assert "output_hash" in output
+
+
+def test_settle_person_run_id_is_unique() -> None:
+    first = settle_person(
+        _attendance_rows(),
+        _payment_rows(),
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+    second = settle_person(
+        _attendance_rows(),
+        _payment_rows(),
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+    first_match = re.search(r"- run_id: ([0-9a-f]{12})", first)
+    second_match = re.search(r"- run_id: ([0-9a-f]{12})", second)
+    assert first_match and second_match
+    assert first_match.group(1) != second_match.group(1)
+
+
+def test_settle_person_can_hide_audit_sections() -> None:
+    output = settle_person(
+        _attendance_rows(),
+        _payment_rows(),
+        person_name="王怀宇",
+        role="组长",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={"show_notes": 0, "show_checks": 0, "show_audit": 0},
+    )
+
+    assert "6）备注与校核摘要" not in output
+    assert "7）校核摘要" not in output
+    assert "8）审计留痕" not in output
+    assert "日志：logs/" not in output

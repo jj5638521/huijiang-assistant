@@ -1,4 +1,7 @@
 # CHANGELOG（只记录差异）
+- 2025-11-25：工资模块升级 **v2025-11-25R59**
+  - run_id 每次运行唯一；日志文件名改为 logs/{run_id}_{hash8}.json 避免覆盖。
+  - data/当前/配置.txt 新增 show_notes/show_checks/show_audit 开关（默认 1）。
 - 2025-11-25：工资模块升级 **v2025-11-25R58**
   - 默认 verbose=0：终端正文仅保留 run_id + 规则版本并追加日志路径，清洗日志/审计明细移至日志文件。
   - input_hash/output_hash、校核证据、待确认明细统一写入 logs/{run_id}.json；verbose=1 才在正文展示。

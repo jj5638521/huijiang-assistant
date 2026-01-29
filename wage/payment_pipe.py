@@ -49,6 +49,9 @@ STATUS_WHITELIST = {
     "审核通过",
 }
 
+WAGE_KEYWORDS = ("工资",)
+PREPAY_KEYWORDS = ("预支", "借支", "预发", "预借", "垫付")
+
 
 @dataclass(frozen=True)
 class PaymentItem:
@@ -172,19 +175,63 @@ def _normalize_date(value: str) -> str:
     return value.strip()
 
 
-def _categorize(raw_type: str) -> str:
+def _categorize(raw_type: str, remark: str) -> str:
     text = raw_type.strip()
-    if any(keyword in text for keyword in ("工资",)):
-        return "工资"
-    if any(keyword in text for keyword in ("预支", "借支", "预发")):
+    note = remark.strip()
+    if any(keyword in text for keyword in PREPAY_KEYWORDS) or any(
+        keyword in note for keyword in PREPAY_KEYWORDS
+    ):
         return "预支"
-    if any(keyword in text for keyword in ("餐补", "伙食", "盒饭", "工作餐")):
-        return "餐补"
-    if any(keyword in text for keyword in ("油费", "ETC")):
-        return "路费"
-    if any(keyword in text for keyword in ("路补", "顺风车", "拼车", "打车", "滴滴", "路费")):
-        return "路补"
+    if any(keyword in text for keyword in WAGE_KEYWORDS) or any(
+        keyword in note for keyword in WAGE_KEYWORDS
+    ):
+        return "工资"
     return "其他"
+
+
+def _matches_target_person(
+    name_value: str,
+    remark_value: str,
+    target_person: str | None,
+) -> bool:
+    if target_person:
+        if name_value == target_person:
+            return True
+        return bool(remark_value) and target_person in remark_value
+    return bool(name_value)
+
+
+def _is_wage_related(
+    type_value: str,
+    status_value: str,
+    remark_value: str,
+    name_value: str,
+    target_person: str | None,
+) -> bool:
+    type_wage = any(keyword in type_value for keyword in WAGE_KEYWORDS)
+    type_prepay = any(keyword in type_value for keyword in PREPAY_KEYWORDS)
+    remark_wage = any(keyword in remark_value for keyword in WAGE_KEYWORDS)
+    remark_prepay = any(keyword in remark_value for keyword in PREPAY_KEYWORDS)
+    name_match = _matches_target_person(name_value, remark_value, target_person)
+    status_valid = status_value in STATUS_WHITELIST
+    force_mapping = type_wage and name_match and status_valid
+    if type_wage or type_prepay or force_mapping:
+        return True
+    if (remark_wage or remark_prepay) and name_match:
+        return True
+    return False
+
+
+def _remark_wage_candidate(
+    remark_value: str,
+    name_value: str,
+    target_person: str | None,
+) -> bool:
+    if not remark_value:
+        return False
+    if not any(keyword in remark_value for keyword in WAGE_KEYWORDS + PREPAY_KEYWORDS):
+        return False
+    return _matches_target_person(name_value, remark_value, target_person)
 
 
 def compute_payments(
@@ -244,8 +291,6 @@ def compute_payments(
             attendance_name_key,
         ):
             continue
-        if not is_payment_candidate(row):
-            continue
         if None in (date_key, amount_key, status_key, type_key, name_key):
             continue
         date_value = _normalize_date(row.get(date_key, ""))
@@ -258,6 +303,25 @@ def compute_payments(
         voucher_value = row.get(voucher_key, "").strip() if voucher_key else ""
         remark_value = row.get(remark_key, "").strip() if remark_key else ""
 
+        if not is_payment_candidate(row) and not _remark_wage_candidate(
+            remark_value,
+            name_value,
+            target_person,
+        ):
+            continue
+
+        if target_person and name_value and name_value != target_person:
+            continue
+
+        if not _is_wage_related(
+            type_value,
+            status_value,
+            remark_value,
+            name_value,
+            target_person,
+        ):
+            continue
+
         amount, invalid_amount = _parse_amount(amount_raw)
         if amount is None:
             if invalid_amount:
@@ -268,12 +332,10 @@ def compute_payments(
                 )
             continue
 
-        if target_person and name_value and name_value != target_person:
-            continue
         if project_name and project_value and project_value != project_name:
             project_mismatches.append(f"{name_value}@{date_value}: {project_value}")
 
-        category = _categorize(type_value)
+        category = _categorize(type_value, remark_value)
         item = PaymentItem(
             line_no=index,
             date=date_value,
@@ -319,14 +381,10 @@ def compute_payments(
             invalid_status_items.append(item)
             continue
 
-        if category == "工资" or category == "餐补":
+        if category == "工资":
             paid_items.append(item)
         elif category == "预支":
             prepay_items.append(item)
-        elif category == "路补":
-            road_allowance_items.append(item)
-        elif category == "路费":
-            project_expense_items.append(item)
         else:
             pending_items.append(item)
 
@@ -367,6 +425,9 @@ def collect_payment_people(
     headers = {key.strip() for row in rows for key in row.keys()}
     name_key = _find_header(headers, NAME_HEADERS)
     project_key = _find_header(headers, PROJECT_HEADERS)
+    type_key = _find_header(headers, TYPE_HEADERS)
+    status_key = _find_header(headers, STATUS_HEADERS)
+    remark_key = _find_header(headers, REMARK_HEADERS)
     attendance_work_key = _find_attendance_work_header(headers)
     attendance_date_key = _find_header(headers, ATTENDANCE_DATE_HEADERS)
     attendance_name_key = _find_header(headers, ATTENDANCE_NAME_HEADERS)
@@ -381,9 +442,24 @@ def collect_payment_people(
             attendance_name_key,
         ):
             continue
-        if not is_payment_candidate(row):
-            continue
         name_value = row.get(name_key, "").strip()
+        remark_value = row.get(remark_key, "").strip() if remark_key else ""
+        type_value = row.get(type_key, "").strip() if type_key else ""
+        status_value = row.get(status_key, "").strip() if status_key else ""
+        if not is_payment_candidate(row) and not _remark_wage_candidate(
+            remark_value,
+            name_value,
+            None,
+        ):
+            continue
+        if not _is_wage_related(
+            type_value,
+            status_value,
+            remark_value,
+            name_value,
+            None,
+        ):
+            continue
         if not name_value:
             continue
         raw_project = row.get(project_key, "").strip() if project_key else ""

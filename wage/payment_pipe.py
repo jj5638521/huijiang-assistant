@@ -9,14 +9,14 @@ DATE_HEADERS = ["报销日期", "支付日期", "打款日期", "日期"]
 AMOUNT_HEADERS = ["报销金额", "金额", "支付金额", "实付金额"]
 STATUS_HEADERS = ["报销状态", "状态", "付款状态"]
 RESULT_HEADERS = ["报销结果", "审核结果", "审批结果", "结果"]
-TYPE_HEADERS = ["报销类型", "费用类型", "类别", "类型", "科目"]
+TYPE_HEADERS = ["类型", "报销类型", "费用类型", "科目", "类别", "费用类别"]
 NAME_HEADERS = ["报销人员", "姓名", "收款人", "人员"]
 PROJECT_HEADERS = ["项目", "项目名称"]
 VOUCHER_HEADERS = ["上传凭证", "凭证号", "凭证", "票据号", "流水号", "订单号"]
 REMARK_HEADERS = ["备注", "说明", "报销备注", "用途"]
 
 CANDIDATE_AMOUNT_HEADERS = ["金额", "报销金额", "支付金额", "实付金额"]
-CANDIDATE_CATEGORY_HEADERS = ["报销类型", "费用类型", "类型", "类别", "科目"]
+CANDIDATE_CATEGORY_HEADERS = ["类型", "报销类型", "费用类型", "科目", "类别", "费用类别"]
 CANDIDATE_STATUS_HEADERS = ["报销状态", "状态", "付款状态"]
 CANDIDATE_RESULT_HEADERS = ["报销结果", "审核结果", "审批结果", "结果"]
 CANDIDATE_VOUCHER_HEADERS = ["凭证号", "上传凭证", "票据号", "流水号", "订单号"]
@@ -81,6 +81,7 @@ class PaymentResult:
     missing_fields: list[str]
     invalid_amounts: list[str]
     missing_amount_candidates: list[str]
+    missing_type_candidates: list[str]
     project_mismatches: list[str]
     voucher_duplicates: list[str]
     empty_voucher_duplicates: list[str]
@@ -175,69 +176,43 @@ def _normalize_date(value: str) -> str:
     return value.strip()
 
 
-def _categorize(raw_type: str, remark: str) -> str:
+def _categorize(raw_type: str) -> str:
     text = raw_type.strip()
-    note = remark.strip()
-    if any(keyword in text for keyword in PREPAY_KEYWORDS) or any(
-        keyword in note for keyword in PREPAY_KEYWORDS
-    ):
+    if any(keyword in text for keyword in PREPAY_KEYWORDS):
         return "预支"
-    if any(keyword in text for keyword in WAGE_KEYWORDS) or any(
-        keyword in note for keyword in WAGE_KEYWORDS
-    ):
+    if any(keyword in text for keyword in WAGE_KEYWORDS):
         return "工资"
     return "其他"
 
 
-def _matches_target_person(
-    name_value: str,
+def _summarize_text(value: str, limit: int = 20) -> str:
+    text = value.strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
+
+
+def _missing_type_evidence(
+    *,
+    source_name: str | None,
+    line_no: int,
+    raw_type: str,
+    amount_raw: str,
+    voucher_value: str,
     remark_value: str,
-    target_person: str | None,
-) -> bool:
-    if target_person:
-        if name_value == target_person:
-            return True
-        return bool(remark_value) and target_person in remark_value
-    return bool(name_value)
-
-
-def _is_wage_related(
-    type_value: str,
-    status_value: str,
-    remark_value: str,
-    name_value: str,
-    target_person: str | None,
-) -> bool:
-    type_wage = any(keyword in type_value for keyword in WAGE_KEYWORDS)
-    type_prepay = any(keyword in type_value for keyword in PREPAY_KEYWORDS)
-    remark_wage = any(keyword in remark_value for keyword in WAGE_KEYWORDS)
-    remark_prepay = any(keyword in remark_value for keyword in PREPAY_KEYWORDS)
-    name_match = _matches_target_person(name_value, remark_value, target_person)
-    status_valid = status_value in STATUS_WHITELIST
-    force_mapping = type_wage and name_match and status_valid
-    if type_wage or type_prepay or force_mapping:
-        return True
-    if (remark_wage or remark_prepay) and name_match:
-        return True
-    return False
-
-
-def _remark_wage_candidate(
-    remark_value: str,
-    name_value: str,
-    target_person: str | None,
-) -> bool:
-    if not remark_value:
-        return False
-    if not any(keyword in remark_value for keyword in WAGE_KEYWORDS + PREPAY_KEYWORDS):
-        return False
-    return _matches_target_person(name_value, remark_value, target_person)
+) -> str:
+    source_label = source_name or "未知文件"
+    return (
+        f"{source_label} 第{line_no}行 类型缺失: 类型='{raw_type}' 金额='{amount_raw}' "
+        f"凭证='{voucher_value}' 备注='{_summarize_text(remark_value)}'"
+    )
 
 
 def compute_payments(
     payment_rows: Iterable[Mapping[str, str]],
     project_name: str | None,
     target_person: str | None,
+    source_name: str | None = None,
 ) -> PaymentResult:
     rows = list(payment_rows)
     headers = {key.strip() for row in rows for key in row.keys()}
@@ -267,6 +242,7 @@ def compute_payments(
 
     invalid_amounts: list[str] = []
     missing_amount_candidates: list[str] = []
+    missing_type_candidates: list[str] = []
     project_mismatches: list[str] = []
     voucher_seen: set[tuple[str, str, Decimal]] = set()
     voucher_duplicates: list[str] = []
@@ -303,23 +279,27 @@ def compute_payments(
         voucher_value = row.get(voucher_key, "").strip() if voucher_key else ""
         remark_value = row.get(remark_key, "").strip() if remark_key else ""
 
-        if not is_payment_candidate(row) and not _remark_wage_candidate(
-            remark_value,
-            name_value,
-            target_person,
-        ):
+        if not is_payment_candidate(row):
             continue
 
         if target_person and name_value and name_value != target_person:
             continue
 
-        if not _is_wage_related(
-            type_value,
-            status_value,
-            remark_value,
-            name_value,
-            target_person,
-        ):
+        if target_person and not name_value:
+            continue
+        if not type_value:
+            missing_type_candidates.append(
+                _missing_type_evidence(
+                    source_name=source_name,
+                    line_no=index,
+                    raw_type=type_value,
+                    amount_raw=amount_raw,
+                    voucher_value=voucher_value,
+                    remark_value=remark_value,
+                )
+            )
+            continue
+        if "工资" not in type_value:
             continue
 
         amount, invalid_amount = _parse_amount(amount_raw)
@@ -335,7 +315,7 @@ def compute_payments(
         if project_name and project_value and project_value != project_name:
             project_mismatches.append(f"{name_value}@{date_value}: {project_value}")
 
-        category = _categorize(type_value, remark_value)
+        category = _categorize(type_value)
         item = PaymentItem(
             line_no=index,
             date=date_value,
@@ -411,6 +391,7 @@ def compute_payments(
         missing_fields=missing_fields,
         invalid_amounts=invalid_amounts,
         missing_amount_candidates=missing_amount_candidates,
+        missing_type_candidates=missing_type_candidates,
         project_mismatches=project_mismatches,
         voucher_duplicates=voucher_duplicates,
         empty_voucher_duplicates=empty_voucher_duplicates,
@@ -426,8 +407,6 @@ def collect_payment_people(
     name_key = _find_header(headers, NAME_HEADERS)
     project_key = _find_header(headers, PROJECT_HEADERS)
     type_key = _find_header(headers, TYPE_HEADERS)
-    status_key = _find_header(headers, STATUS_HEADERS)
-    remark_key = _find_header(headers, REMARK_HEADERS)
     attendance_work_key = _find_attendance_work_header(headers)
     attendance_date_key = _find_header(headers, ATTENDANCE_DATE_HEADERS)
     attendance_name_key = _find_header(headers, ATTENDANCE_NAME_HEADERS)
@@ -443,27 +422,18 @@ def collect_payment_people(
         ):
             continue
         name_value = row.get(name_key, "").strip()
-        remark_value = row.get(remark_key, "").strip() if remark_key else ""
         type_value = row.get(type_key, "").strip() if type_key else ""
-        status_value = row.get(status_key, "").strip() if status_key else ""
-        if not is_payment_candidate(row) and not _remark_wage_candidate(
-            remark_value,
-            name_value,
-            None,
-        ):
-            continue
-        if not _is_wage_related(
-            type_value,
-            status_value,
-            remark_value,
-            name_value,
-            None,
-        ):
+        if not is_payment_candidate(row):
             continue
         if not name_value:
             continue
         raw_project = row.get(project_key, "").strip() if project_key else ""
         if project_name and raw_project and raw_project != project_name:
+            continue
+        if not type_value:
+            people.add(name_value)
+            continue
+        if "工资" not in type_value:
             continue
         people.add(name_value)
     return people

@@ -52,4 +52,4 @@ def test_payment_pipe_skips_attendance_rows_in_merged_table() -> None:
 
     assert result.missing_amount_candidates == []
     assert len(result.paid_items) == 1
-    assert len(result.prepay_items) == 1
+    assert len(result.prepay_items) == 0

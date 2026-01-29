@@ -28,7 +28,12 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     attendance = context["attendance"]
     payment = context["payment"]
     pricing = context["pricing"]
-    command_ok = bool(context.get("person_name")) and bool(context.get("role"))
+    command_errors = context.get("command_errors") or []
+    command_ok = (
+        bool(context.get("person_name"))
+        and bool(context.get("role"))
+        and not command_errors
+    )
 
     checks: list[CheckResult] = []
 
@@ -38,14 +43,13 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     )
     checks.append(_check("A", "表头映射成功", headers_ok, detail))
 
-    checks.append(
-        _check(
-            "K",
-            "口令信息完整",
-            command_ok,
-            "OK" if command_ok else "缺少姓名/角色",
-        )
-    )
+    command_detail_parts: list[str] = []
+    if not context.get("person_name") or not context.get("role"):
+        command_detail_parts.append("缺少姓名/角色")
+    if command_errors:
+        command_detail_parts.append("；".join(command_errors))
+    command_detail = "OK" if command_ok else "；".join(command_detail_parts)
+    checks.append(_check("K", "口令信息完整", command_ok, command_detail))
 
     project_name = context.get("project_name")
     project_ok = bool(project_name)

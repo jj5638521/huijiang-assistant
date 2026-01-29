@@ -291,12 +291,16 @@ def main() -> int:
     attendance_rows = demo_settle_person._read_csv(selected[0])
     payment_rows = demo_settle_person._read_csv(selected[1])
 
+    runtime_overrides = dict(command.get("runtime_overrides") or {})
     project_name = command.get("project_name")
     if not project_name:
         project_name = demo_settle_person._derive_project_name(selected[0])
         command["project_name"] = project_name
-
-    runtime_overrides = dict(command.get("runtime_overrides") or {})
+        if project_name:
+            demo_settle_person._append_audit_note(
+                runtime_overrides,
+                f"项目名未显式指定，已使用兜底：{project_name}",
+            )
     config_path = data_dir / "当前" / "配置.txt"
     runtime_overrides.update(demo_settle_person._read_runtime_overrides(config_path))
     runtime_overrides["attendance_source"] = selected[0].name

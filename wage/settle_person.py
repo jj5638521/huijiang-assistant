@@ -309,6 +309,8 @@ def settle_person(
     show_audit = int(runtime_overrides.get("show_audit", 1))
     show_logs_in_compact = int(runtime_overrides.get("show_logs_in_compact", 0))
     show_logs_in_detail = int(runtime_overrides.get("show_logs_in_detail", 1))
+    audit_notes = list(runtime_overrides.get("audit_notes") or [])
+    command_errors = list(runtime_overrides.get("command_errors") or [])
     daily_group_override = runtime_overrides.get("daily_group")
     if daily_group_override is not None:
         daily_group = Decimal(str(daily_group_override))
@@ -350,6 +352,7 @@ def settle_person(
         "version_note": VERSION_NOTE,
         "date_sets_consistent": True,
         "require_project_ended": bool(runtime_overrides.get("require_project_ended")),
+        "command_errors": command_errors,
     }
 
     checks, hard_failures = run_checks(context)
@@ -549,6 +552,8 @@ def settle_person(
         next_section += 1
     if show_audit:
         detail_lines.append(f"{next_section}）审计留痕：")
+        for note in audit_notes:
+            detail_lines.append(f"- {note}")
         detail_lines.append(f"- run_id: {run_id}")
         detail_lines.append(f"- 规则版本: {VERSION_NOTE}")
         if verbose:
@@ -665,6 +670,8 @@ def settle_person(
             "prepay_total": _format_decimal(pricing.prepay_total),
             "payable": _format_decimal(pricing.payable),
         },
+        "command_notes": audit_notes,
+        "command_errors": command_errors,
         "differences": differences_for_log,
         "pending_summary": pending_reasons,
         "checks": [

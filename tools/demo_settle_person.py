@@ -222,6 +222,12 @@ def _read_runtime_overrides(config_path: Path) -> dict[str, int]:
     return overrides
 
 
+def _append_audit_note(runtime_overrides: dict[str, object], note: str) -> None:
+    notes = runtime_overrides.setdefault("audit_notes", [])
+    if isinstance(notes, list) and note not in notes:
+        notes.append(note)
+
+
 def _derive_project_name(path: Path) -> str:
     name = path.stem
     name = re.sub(r"(\s*\(\d+\)|\s*（\d+）)$", "", name)
@@ -259,10 +265,15 @@ def main() -> int:
             from . import demo_settle_project
 
             return demo_settle_project.main()
-        if not command.get("project_name"):
-            command["project_name"] = _derive_project_name(selected[0])
-
         runtime_overrides = dict(command.get("runtime_overrides") or {})
+        if not command.get("project_name"):
+            derived_project = _derive_project_name(selected[0])
+            command["project_name"] = derived_project
+            if derived_project:
+                _append_audit_note(
+                    runtime_overrides,
+                    f"项目名未显式指定，已使用兜底：{derived_project}",
+                )
         config_path = data_dir / "当前" / "配置.txt"
         runtime_overrides.update(_read_runtime_overrides(config_path))
         runtime_overrides["attendance_source"] = selected[0].name

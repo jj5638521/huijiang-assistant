@@ -8,6 +8,10 @@ from typing import Any
 
 ROLE_KEYWORDS = ["组长", "组员"]
 FULLWIDTH_SPACE = "\u3000"
+ROAD_VALUE_MAP = {
+    "有": "计算路补",
+    "无": "无路补",
+}
 
 
 def _normalize_line(text: str) -> str:
@@ -148,10 +152,43 @@ def _parse_blocks(lines: list[str]) -> tuple[dict[str, str], dict[str, Decimal]]
     return role_overrides, fixed_daily_rates
 
 
+def _append_audit_note(result: dict[str, Any], note: str) -> None:
+    runtime_overrides = result.setdefault("runtime_overrides", {})
+    notes = runtime_overrides.setdefault("audit_notes", [])
+    if note not in notes:
+        notes.append(note)
+
+
+def _append_command_error(result: dict[str, Any], message: str) -> None:
+    runtime_overrides = result.setdefault("runtime_overrides", {})
+    errors = runtime_overrides.setdefault("command_errors", [])
+    errors.append(message)
+
+
+def _normalize_road_value(value: str) -> str | None:
+    normalized = _normalize_line(value)
+    if not normalized:
+        return None
+    return normalized.split()[0]
+
+
+def _set_road_cmd(
+    result: dict[str, Any],
+    road_cmd: str,
+    source: str,
+) -> None:
+    runtime_overrides = result.setdefault("runtime_overrides", {})
+    runtime_overrides["road_passphrase"] = road_cmd
+    result["road_cmd"] = road_cmd
+    result["_road_cmd_source"] = source
+
+
 def _apply_kv_mapping(
     result: dict[str, Any],
     key: str,
     value: str,
+    *,
+    source_line: str | None = None,
 ) -> None:
     if key in {"项目已结束", "项目结束", "项目是否结束"}:
         parsed = _parse_bool(value)
@@ -161,9 +198,29 @@ def _apply_kv_mapping(
     if key == "项目":
         result["project_name"] = value.strip()
         return
+    if key == "路补":
+        normalized = _normalize_road_value(value)
+        road_cmd = ROAD_VALUE_MAP.get(normalized or "")
+        if not road_cmd:
+            message = (
+                f"路补仅支持有/无，收到'{value.strip() or value}'"
+            )
+            if source_line:
+                message = f"{message}，原行：{source_line.strip()}"
+            _append_command_error(result, message)
+            return
+        existing_source = result.get("_road_cmd_source")
+        if existing_source and existing_source != "wage_line":
+            _append_audit_note(result, "口令冲突：已采用工资行内路补设置")
+        _set_road_cmd(result, road_cmd, "wage_line")
+        return
     if key == "路补口令":
-        runtime_overrides = result.setdefault("runtime_overrides", {})
-        runtime_overrides["road_passphrase"] = value.strip()
+        existing_source = result.get("_road_cmd_source")
+        if existing_source == "wage_line":
+            _append_audit_note(result, "口令冲突：已采用工资行内路补设置")
+            return
+        _set_road_cmd(result, value.strip(), "standalone")
+        return
 
 
 def parse_command(text: str) -> dict[str, Any]:
@@ -173,8 +230,12 @@ def parse_command(text: str) -> dict[str, Any]:
     runtime_overrides.
     """
     raw_lines = text.splitlines()
-    lines = [_normalize_line(line) for line in raw_lines if _normalize_line(line)]
-    first_line = lines[0] if lines else ""
+    normalized_lines: list[tuple[str, str]] = []
+    for raw_line in raw_lines:
+        normalized = _normalize_line(raw_line)
+        if normalized:
+            normalized_lines.append((raw_line, normalized))
+    first_line = normalized_lines[0][1] if normalized_lines else ""
     mode = _detect_mode(first_line)
     role_overrides: dict[str, str] = {}
     fixed_daily_rates: dict[str, Decimal] = {}
@@ -184,9 +245,10 @@ def parse_command(text: str) -> dict[str, Any]:
         "role": _extract_role(first_line),
         "project_ended": None,
         "project_name": None,
+        "road_cmd": None,
         "role_overrides": role_overrides,
         "fixed_daily_rates": fixed_daily_rates,
-        "runtime_overrides": {},
+        "runtime_overrides": {"audit_notes": [], "command_errors": []},
     }
     if mode == "project" and first_line:
         project_name, remainder = _extract_project_header(first_line)
@@ -194,13 +256,23 @@ def parse_command(text: str) -> dict[str, Any]:
             result["project_name"] = project_name
         if remainder:
             for key, value in _extract_kv_pairs(remainder):
-                _apply_kv_mapping(result, key, value)
+                _apply_kv_mapping(
+                    result,
+                    key,
+                    value,
+                    source_line=normalized_lines[0][0],
+                )
     if first_line:
         for key, value in _extract_kv_pairs(first_line):
-            _apply_kv_mapping(result, key, value)
+            _apply_kv_mapping(
+                result,
+                key,
+                value,
+                source_line=normalized_lines[0][0],
+            )
 
     block_mode: str | None = None
-    for line in lines[1:]:
+    for raw_line, line in normalized_lines[1:]:
         if line.startswith("角色"):
             block_mode = "role"
             continue
@@ -224,6 +296,7 @@ def parse_command(text: str) -> dict[str, Any]:
                 fixed_daily_rates[name] = rate
             continue
         for key, value in _extract_kv_pairs(line):
-            _apply_kv_mapping(result, key, value)
+            _apply_kv_mapping(result, key, value, source_line=raw_line)
 
+    result.pop("_road_cmd_source", None)
     return result

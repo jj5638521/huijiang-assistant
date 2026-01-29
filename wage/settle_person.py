@@ -103,15 +103,21 @@ def _format_source(attendance_source: str | None, payment_source: str | None) ->
 
 
 def _resolve_road_passphrase(
-    project_ended: bool | None, road_raw_total: Decimal, override: str | None
+    project_ended: bool | None, override: str | None
 ) -> str:
     if override:
         return override
     if project_ended is False:
         return "不计算路补"
-    if road_raw_total == 0:
-        return "无路补"
-    return "有路补"
+    return "无路补"
+
+
+def _compute_road_allowance(
+    project_ended: bool | None, road_cmd: str | None
+) -> Decimal:
+    if project_ended is True and road_cmd == "计算路补":
+        return Decimal("200")
+    return Decimal("0")
 
 
 def _compute_pricing(
@@ -121,15 +127,12 @@ def _compute_pricing(
     single_yes: Decimal,
     single_no: Decimal,
     project_ended: bool | None,
+    road_cmd: str | None,
 ) -> PricingResult:
     group_yes_days = len(attendance.date_sets["全组｜出勤"])
     group_no_days = len(attendance.date_sets["全组｜未出勤"])
     single_yes_days = len(attendance.date_sets["单防撞｜出勤"])
     single_no_days = len(attendance.date_sets["单防撞｜未出勤"])
-    road_raw_total = sum(
-        (item.amount for item in payment.road_allowance_items), Decimal("0")
-    )
-
     wage_group = daily_group * Decimal(group_yes_days)
     wage_single_yes = single_yes * Decimal(single_yes_days)
     wage_single_no = single_no * Decimal(single_no_days)
@@ -138,9 +141,7 @@ def _compute_pricing(
     meal_total = Decimal("25") * Decimal(group_yes_days) + Decimal("40") * Decimal(
         group_no_days
     )
-    travel_total = (
-        min(Decimal("200"), road_raw_total) if project_ended else Decimal("0")
-    )
+    travel_total = _compute_road_allowance(project_ended, road_cmd)
 
     paid_total = payment.paid_total
     prepay_total = payment.prepay_total
@@ -322,8 +323,17 @@ def settle_person(
     single_yes = Decimal(str(runtime_overrides.get("single_yes", DEFAULT_SINGLE_YES)))
     single_no = Decimal(str(runtime_overrides.get("single_no", DEFAULT_SINGLE_NO)))
 
+    road_cmd = runtime_overrides.get("road_cmd") or runtime_overrides.get(
+        "road_passphrase"
+    )
     pricing = _compute_pricing(
-        attendance, payment, daily_group, single_yes, single_no, project_ended
+        attendance,
+        payment,
+        daily_group,
+        single_yes,
+        single_no,
+        project_ended,
+        road_cmd,
     )
 
     input_hash = _hash_payload(
@@ -422,16 +432,12 @@ def settle_person(
     group_no_days = len(attendance.date_sets["全组｜未出勤"])
     single_yes_days = len(attendance.date_sets["单防撞｜出勤"])
     single_no_days = len(attendance.date_sets["单防撞｜未出勤"])
-    road_raw_total = sum(
-        (item.amount for item in payment.road_allowance_items), Decimal("0")
-    )
     project_ended_label = (
         "是" if project_ended is True else "否" if project_ended is False else "未知"
     )
     road_passphrase = _resolve_road_passphrase(
         project_ended,
-        road_raw_total,
-        runtime_overrides.get("road_passphrase"),
+        road_cmd,
     )
     source_line = _format_source(
         runtime_overrides.get("attendance_source"),
@@ -491,7 +497,10 @@ def settle_person(
             f"    • 餐补：25×{group_yes_days} + 40×{group_no_days}="
             f"{_format_decimal(pricing.meal_total)}"
         ),
-        f"    • 路补：{_format_decimal(pricing.travel_total)}",
+        (
+            f"    • 路补：{_format_decimal(pricing.travel_total)}"
+            f"{'（固定200元/人/项目）' if project_ended is True and road_cmd == '计算路补' else ''}"
+        ),
         "3）已付/预支明细：",
     ]
 

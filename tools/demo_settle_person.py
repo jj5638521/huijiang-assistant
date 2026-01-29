@@ -259,12 +259,13 @@ def main() -> int:
     wage_lines = [line for line in lines if line.startswith("工资：")]
     global_lines = [line for line in lines if not line.startswith("工资：")]
 
-    def _run_single(command_source: str) -> int:
+    def _run_single(command_source: str, *, print_output: bool = True) -> str:
         command = parse_command(command_source)
         if command.get("mode") == "project":
             from . import demo_settle_project
 
-            return demo_settle_project.main()
+            demo_settle_project.main()
+            return ""
         runtime_overrides = dict(command.get("runtime_overrides") or {})
         if not command.get("project_name"):
             derived_project = _derive_project_name(selected[0])
@@ -288,21 +289,42 @@ def main() -> int:
             project_name=command.get("project_name"),
             runtime_overrides=runtime_overrides,
         )
-        print(output)
-        return 0
+        if print_output:
+            print(output)
+        return output
 
     if len(wage_lines) <= 1:
-        return _run_single(command_text)
+        _run_single(command_text)
+        return 0
 
     temp_path = data_dir / "当前" / "._口令_单人临时.txt"
     try:
+        outputs: list[str] = []
         for index, wage_line in enumerate(wage_lines):
             temp_content = "\n".join(global_lines + [wage_line])
             temp_path.write_text(temp_content, encoding="utf-8")
             temp_command_text = _read_command_file(temp_path)
             if temp_command_text:
-                _run_single(temp_command_text)
-            if index != len(wage_lines) - 1:
+                outputs.append(_run_single(temp_command_text, print_output=False))
+        marker = "【压缩版（发员工）】"
+        detailed_parts: list[str] = []
+        compact_parts: list[str] = []
+        for text in outputs:
+            if marker in text:
+                detailed_part, compact_tail = text.split(marker, 1)
+                detailed_parts.append(detailed_part.rstrip())
+                compact_parts.append(marker + compact_tail)
+            else:
+                detailed_parts.append(text.rstrip())
+                compact_parts.append("")
+        for index, detailed_part in enumerate(detailed_parts):
+            print(detailed_part)
+            if index != len(detailed_parts) - 1:
+                print()
+        print("【压缩版合集（发员工）】")
+        for index, compact_part in enumerate(compact_parts):
+            print(compact_part)
+            if index != len(compact_parts) - 1:
                 print()
     finally:
         if temp_path.exists():

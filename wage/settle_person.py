@@ -244,6 +244,8 @@ def _collect_invalid_items(attendance: AttendanceResult, payment: PaymentResult)
         items.append("项目字段不匹配")
     if payment.invalid_amounts:
         items.append(f"支付表金额格式异常: {'; '.join(payment.invalid_amounts)}")
+    if payment.missing_type_candidates:
+        items.append("支付行类型缺失（必填）")
     if payment.voucher_duplicates:
         items.append("凭证唯一性冲突")
     if payment.empty_voucher_duplicates:
@@ -261,6 +263,8 @@ def _collect_suggestions(attendance: AttendanceResult, payment: PaymentResult) -
         suggestions.append("统一日期格式为 YYYY-MM-DD")
     if payment.invalid_amounts:
         suggestions.append("金额请填写数字金额，可包含￥/元/逗号但勿含文字")
+    if payment.missing_type_candidates:
+        suggestions.append("支付行类型必填：请补‘报销类型/费用类型/科目/类别’")
     if payment.voucher_duplicates or payment.empty_voucher_duplicates:
         suggestions.append("确保凭证号唯一或补充凭证")
     if attendance.project_mismatches or payment.project_mismatches:
@@ -302,7 +306,12 @@ def settle_person(
     payment_list = list(payment_rows)
 
     attendance = compute_attendance(attendance_list, project_name, person_name)
-    payment = compute_payments(payment_list, project_name, person_name)
+    payment = compute_payments(
+        payment_list,
+        project_name,
+        person_name,
+        runtime_overrides.get("payment_source"),
+    )
 
     verbose = int(runtime_overrides.get("verbose", 0))
     show_notes = int(runtime_overrides.get("show_notes", 1))
@@ -653,6 +662,7 @@ def settle_person(
             ),
             "pending_items": _serialize_payment_items(payment.pending_items),
             "missing_amount_candidates": payment.missing_amount_candidates,
+            "missing_type_candidates": payment.missing_type_candidates,
             "missing_status_items": _serialize_payment_items(payment.missing_status_items),
             "invalid_status_items": _serialize_payment_items(payment.invalid_status_items),
             "approved_result_items": _serialize_payment_items(

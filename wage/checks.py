@@ -125,6 +125,15 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     )
     checks.append(_check("G", "金额数值化", amount_ok, amount_detail))
 
+    type_required_ok = not payment.missing_type_candidates
+    type_detail = (
+        "OK"
+        if type_required_ok
+        else "支付行类型缺失（必填）：请补‘报销类型/费用类型/科目/类别’；"
+        + "; ".join(payment.missing_type_candidates)
+    )
+    checks.append(_check("T", "支付行类型必填", type_required_ok, type_detail))
+
     date_sets_ok = context.get("date_sets_consistent", True)
     checks.append(
         _check(

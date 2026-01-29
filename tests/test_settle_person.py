@@ -112,7 +112,7 @@ def test_settle_person_allowances_enabled() -> None:
         role="组长",
         project_ended=True,
         project_name="测试项目",
-        runtime_overrides={},
+        runtime_overrides={"road_passphrase": "计算路补"},
     )
 
     assert "餐补：25×1 + 40×1=65" in output
@@ -138,7 +138,7 @@ def test_settle_person_no_road_allowance_when_missing() -> None:
         role="组长",
         project_ended=True,
         project_name="测试项目",
-        runtime_overrides={},
+        runtime_overrides={"road_passphrase": "无路补"},
     )
 
     assert "路补：0" in output

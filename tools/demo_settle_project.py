@@ -12,9 +12,12 @@ from typing import Iterable
 from wage.attendance_pipe import collect_attendance_people, compute_attendance
 from wage.command import parse_command
 from wage.payment_pipe import collect_payment_people
+from wage.name_utils import name_key, normalize_name_map
 from wage.settle_person import DAILY_WAGE_MAP, ROLE_WAGE_MAP, settle_person
 
 from . import demo_settle_person
+
+NORMALIZED_DAILY_WAGE_MAP = normalize_name_map(DAILY_WAGE_MAP)
 
 
 @dataclass(frozen=True)
@@ -96,10 +99,11 @@ def _resolve_daily_wage(
     role: str,
     table_roles: dict[str, str],
 ) -> tuple[Decimal, str]:
-    if name in fixed_daily_rates:
-        return fixed_daily_rates[name], "口令"
-    if name in DAILY_WAGE_MAP:
-        return DAILY_WAGE_MAP[name], "系统"
+    key = name_key(name)
+    if key in fixed_daily_rates:
+        return fixed_daily_rates[key], "口令"
+    if key in NORMALIZED_DAILY_WAGE_MAP:
+        return NORMALIZED_DAILY_WAGE_MAP[key], "系统"
     if name in table_roles:
         return ROLE_WAGE_MAP.get(table_roles[name], Decimal("0")), "表"
     if role in ROLE_WAGE_MAP:

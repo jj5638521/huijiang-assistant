@@ -11,6 +11,7 @@ from typing import Iterable, Mapping
 
 from .attendance_pipe import AttendanceResult, compute_attendance
 from .checks import CheckResult, run_checks
+from .name_utils import name_key, normalize_name_map
 from .payment_pipe import PaymentResult, compute_payments
 from .render_blocking_report import render_blocking_report
 from .ruleset import get_ruleset_version
@@ -27,6 +28,7 @@ DAILY_WAGE_MAP = {
     "王怀良": Decimal("230"),
     "袁玉兵": Decimal("300"),
 }
+NORMALIZED_DAILY_WAGE_MAP = normalize_name_map(DAILY_WAGE_MAP)
 ROLE_WAGE_MAP = {
     "组长": Decimal("300"),
     "组员": Decimal("200"),
@@ -364,8 +366,9 @@ def settle_person(
     if daily_group_override is not None:
         daily_group = Decimal(str(daily_group_override))
     else:
-        daily_group = DAILY_WAGE_MAP.get(
-            person_name or "",
+        lookup_key = name_key(person_name or "")
+        daily_group = NORMALIZED_DAILY_WAGE_MAP.get(
+            lookup_key,
             ROLE_WAGE_MAP.get(role or "", Decimal("0")),
         )
     single_yes = Decimal(str(runtime_overrides.get("single_yes", DEFAULT_SINGLE_YES)))
@@ -428,6 +431,15 @@ def settle_person(
         project_pool_issue=project_pool_issue and project_name_source != "command",
         project_mismatch_blocking=project_mismatch_blocking,
     )
+    name_key_conflicts = runtime_overrides.get("name_key_conflicts") or []
+    for conflict in name_key_conflicts:
+        if isinstance(conflict, dict):
+            key = conflict.get("name_key")
+            names = conflict.get("display_names") or []
+            display = ",".join(names) if isinstance(names, list) else str(names)
+            invalid_items.append(
+                f"差异清单: name_key={key} 显示名={display}"
+            )
     suggestions = _collect_suggestions(
         attendance,
         payment,

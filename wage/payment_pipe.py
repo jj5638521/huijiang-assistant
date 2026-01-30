@@ -13,7 +13,7 @@ TYPE_HEADERS = ["类型", "报销类型", "费用类型", "科目", "类别", "�
 NAME_HEADERS = ["报销人员", "姓名", "收款人", "人员"]
 PROJECT_HEADERS = ["项目", "项目名称"]
 VOUCHER_HEADERS = ["上传凭证", "凭证号", "凭证", "票据号", "流水号", "订单号"]
-REMARK_HEADERS = ["备注", "说明", "报销备注", "用途"]
+REMARK_HEADERS = ["备注", "说明", "报销备注", "报销说明", "用途"]
 
 CANDIDATE_AMOUNT_HEADERS = ["金额", "报销金额", "支付金额", "实付金额"]
 CANDIDATE_CATEGORY_HEADERS = ["类型", "报销类型", "费用类型", "科目", "类别", "费用类别"]

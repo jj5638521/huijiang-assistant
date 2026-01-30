@@ -145,9 +145,17 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     )
 
     single_required_ok = True
+    single_detail = "OK"
     if any(attendance.date_sets["单防撞｜出勤"] + attendance.date_sets["单防撞｜未出勤"]):
-        single_required_ok = attendance.has_vehicle_field
-    single_detail = "OK" if single_required_ok else "缺少车辆字段"
+        if attendance.has_vehicle_field:
+            single_required_ok = True
+            single_detail = "OK"
+        elif attendance.has_explicit_mode:
+            single_required_ok = True
+            single_detail = "OK(出勤模式)"
+        else:
+            single_required_ok = False
+            single_detail = "缺少车辆字段/出勤模式"
     checks.append(_check("M", "单防撞必要字段满足", single_required_ok, single_detail))
 
     pending_total = len(payment.pending_items) + len(payment.missing_amount_candidates)

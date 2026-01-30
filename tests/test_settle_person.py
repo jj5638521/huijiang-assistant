@@ -79,12 +79,12 @@ def test_settle_person_outputs_two_segments() -> None:
     detailed, compressed = output.split("\n\n")
     assert "日期（模式→出勤）" in compressed
     assert "2025-11-01" in compressed
-    assert "工资：全组300×1=300；单防撞270×1=270；合计=570" in compressed
+    assert "工资：全组300×1=300；单防撞300×1=300；合计=600" in compressed
     assert "单防撞：" not in compressed
     assert compressed.count("工资：") == 1
     assert "餐补：25×1 + 40×1=65（施工1天/未施工1天）" in compressed
     assert (
-        "应付：工资570 + 餐补65 + 路补0 - 已付300 - 预支0 = 335" in compressed
+        "应付：工资600 + 餐补65 + 路补0 - 已付300 - 预支0 = 365" in compressed
     )
     assert re.search(r"日志：logs/[0-9a-f]{12}_[0-9a-f]{8}\.json", detailed)
     assert "日志：logs/" not in compressed
@@ -366,6 +366,38 @@ def test_settle_person_can_hide_audit_sections() -> None:
     assert "7）校核摘要" not in output
     assert "8）审计留痕" not in output
     assert "日志：logs/" not in output
+
+
+def test_settle_person_blocks_on_name_key_conflicts() -> None:
+    attendance_rows = [
+        {"日期": "2025-11-01", "姓名": "张三(P001)", "是否施工": "是", "项目": "测试项目"},
+        {"日期": "2025-11-02", "姓名": "张三(P002)", "是否施工": "是", "项目": "测试项目"},
+    ]
+    payment_rows = [
+        {
+            "报销日期": "2025-11-03",
+            "报销金额": "0",
+            "报销状态": "已支付",
+            "报销类型": "工资",
+            "报销人员": "张三(P001)",
+            "项目": "测试项目",
+            "上传凭证": "V900",
+        }
+    ]
+
+    output = settle_person(
+        attendance_rows,
+        payment_rows,
+        person_name="张三(P001)",
+        role="组员",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+
+    assert output.startswith("【阻断｜工资结算】")
+    assert "name_key=张三" in output
+    assert "行号=1,2" in output
 
 
 def test_settle_person_compact_can_show_logs_when_enabled() -> None:

@@ -233,6 +233,7 @@ def settle_project(
 
         per_runtime = dict(runtime_overrides)
         per_runtime["daily_group"] = str(daily_rate)
+        per_runtime["fixed_daily_rates"] = fixed_daily_rates
         per_runtime["require_project_ended"] = 1
 
         output_text = settle_person(

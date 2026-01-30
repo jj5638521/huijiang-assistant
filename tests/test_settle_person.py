@@ -79,8 +79,9 @@ def test_settle_person_outputs_two_segments() -> None:
     detailed, compressed = output.split("\n\n")
     assert "日期（模式→出勤）" in compressed
     assert "2025-11-01" in compressed
-    assert "工资：300×1=300（全组1天）" in compressed
-    assert "单防撞：270×1 + 135×0=270；最终工资合计=570" in compressed
+    assert "工资：全组300×1=300；单防撞270×1=270；合计=570" in compressed
+    assert "单防撞：" not in compressed
+    assert compressed.count("工资：") == 1
     assert "餐补：25×1 + 40×1=65（施工1天/未施工1天）" in compressed
     assert (
         "应付：工资570 + 餐补65 + 路补0 - 已付300 - 预支0 = 335" in compressed

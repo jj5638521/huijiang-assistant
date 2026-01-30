@@ -639,18 +639,33 @@ def settle_person(
     if not verbose and show_audit and show_logs_in_detail:
         detail_lines.append(f"日志：logs/{log_filename}")
     compressed_lines = ["【压缩版（发员工）】", title_line]
-    compressed_lines.append(
-        f"工资：{_format_decimal(daily_group)}×{group_yes_days}="
-        f"{_format_decimal(pricing.wage_group)}（全组{group_yes_days}天）"
-    )
-    if single_yes_days or single_no_days:
+    if group_yes_days > 0 and (single_yes_days or single_no_days):
+        single_terms = []
+        if single_yes_days:
+            single_terms.append(f"{_format_decimal(single_yes)}×{single_yes_days}")
+        if single_no_days:
+            single_terms.append(f"{_format_decimal(single_no)}×{single_no_days}")
         compressed_lines.append(
-            "单防撞："
-            f"{_format_decimal(single_yes)}×{single_yes_days} + "
-            f"{_format_decimal(single_no)}×{single_no_days}="
+            "工资："
+            f"全组{_format_decimal(daily_group)}×{group_yes_days}="
+            f"{_format_decimal(pricing.wage_group)}；"
+            f"单防撞{' + '.join(single_terms)}="
             f"{_format_decimal(pricing.wage_single_yes + pricing.wage_single_no)}；"
-            f"最终工资合计={_format_decimal(pricing.wage_total)}"
+            f"合计={_format_decimal(pricing.wage_total)}"
         )
+    else:
+        compressed_lines.append(
+            f"工资：{_format_decimal(daily_group)}×{group_yes_days}="
+            f"{_format_decimal(pricing.wage_group)}（全组{group_yes_days}天）"
+        )
+        if single_yes_days or single_no_days:
+            compressed_lines.append(
+                "单防撞："
+                f"{_format_decimal(single_yes)}×{single_yes_days} + "
+                f"{_format_decimal(single_no)}×{single_no_days}="
+                f"{_format_decimal(pricing.wage_single_yes + pricing.wage_single_no)}；"
+                f"最终工资合计={_format_decimal(pricing.wage_total)}"
+            )
     compressed_lines.append(
         "餐补："
         f"25×{group_yes_days} + 40×{group_no_days}="

@@ -30,3 +30,8 @@ __MACOSX/
 # Python
 __pycache__/
 *.pyc
+# runtime data (keep outside git)
+data/当前/
+data/归档/
+输出/
+logs/

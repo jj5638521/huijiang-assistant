@@ -35,3 +35,10 @@ data/当前/
 data/归档/
 输出/
 logs/
+
+# ignore symlink nodes too (not just dirs)
+data/当前
+data/归档
+
+# macOS junk
+data/.DS_Store

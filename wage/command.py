@@ -5,6 +5,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from .name_utils import name_key
 
 ROLE_KEYWORDS = ["组长", "组员"]
 FULLWIDTH_SPACE = "\u3000"
@@ -124,6 +125,7 @@ def _extract_kv_pairs(line: str) -> list[tuple[str, str]]:
 def _parse_blocks(lines: list[str]) -> tuple[dict[str, str], dict[str, Decimal]]:
     role_overrides: dict[str, str] = {}
     fixed_daily_rates: dict[str, Decimal] = {}
+    fixed_rate_names: dict[str, set[str]] = {}
     mode: str | None = None
     for line in lines:
         stripped = _normalize_line(line)
@@ -148,7 +150,9 @@ def _parse_blocks(lines: list[str]) -> tuple[dict[str, str], dict[str, Decimal]]
                 continue
             rate = _parse_fixed_daily_rate(value)
             if rate is not None:
-                fixed_daily_rates[name] = rate
+                key = name_key(name)
+                fixed_daily_rates[key] = rate
+                fixed_rate_names.setdefault(key, set()).add(name.strip())
     return role_overrides, fixed_daily_rates
 
 
@@ -239,6 +243,8 @@ def parse_command(text: str) -> dict[str, Any]:
     mode = _detect_mode(first_line)
     role_overrides: dict[str, str] = {}
     fixed_daily_rates: dict[str, Decimal] = {}
+    fixed_rate_names: dict[str, set[str]] = {}
+    fixed_rate_conflicts: list[dict[str, object]] = []
     result: dict[str, Any] = {
         "mode": mode,
         "person_name": _extract_person_name(first_line),
@@ -248,7 +254,11 @@ def parse_command(text: str) -> dict[str, Any]:
         "road_cmd": None,
         "role_overrides": role_overrides,
         "fixed_daily_rates": fixed_daily_rates,
-        "runtime_overrides": {"audit_notes": [], "command_errors": []},
+        "runtime_overrides": {
+            "audit_notes": [],
+            "command_errors": [],
+            "name_key_conflicts": [],
+        },
     }
     if mode == "project" and first_line:
         project_name, remainder = _extract_project_header(first_line)
@@ -293,10 +303,28 @@ def parse_command(text: str) -> dict[str, Any]:
                 continue
             rate = _parse_fixed_daily_rate(value)
             if rate is not None:
-                fixed_daily_rates[name] = rate
+                key = name_key(name)
+                fixed_daily_rates[key] = rate
+                fixed_rate_names.setdefault(key, set()).add(name.strip())
             continue
         for key, value in _extract_kv_pairs(line):
             _apply_kv_mapping(result, key, value, source_line=raw_line)
 
     result.pop("_road_cmd_source", None)
+    for key, names in fixed_rate_names.items():
+        if len(names) <= 1:
+            continue
+        display_names = sorted(names)
+        fixed_rate_conflicts.append(
+            {
+                "name_key": key,
+                "display_names": display_names,
+            }
+        )
+        _append_command_error(
+            result,
+            f"固定日薪姓名冲突: name_key={key} 显示名={','.join(display_names)}",
+        )
+    if fixed_rate_conflicts:
+        result["runtime_overrides"]["name_key_conflicts"] = fixed_rate_conflicts
     return result

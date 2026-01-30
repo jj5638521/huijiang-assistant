@@ -2,6 +2,7 @@ from pathlib import Path
 
 from tools import demo_settle_project
 from wage.command import parse_command
+from wage.settle_person import settle_person
 
 
 def _attendance_rows(project: str) -> list[dict[str, str]]:
@@ -73,3 +74,36 @@ def test_fixed_daily_rate_priority(tmp_path: Path) -> None:
 
     wage_text = (output_dir / "工资单_王怀宇.txt").read_text(encoding="utf-8")
     assert "工资：280×1=280" in wage_text
+
+
+def test_fixed_daily_rate_name_key_match() -> None:
+    attendance_rows = [
+        {"日期": "2025-11-01", "姓名": "袁玉兵(P007)", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-01", "姓名": "张三", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-01", "姓名": "李四", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-02", "姓名": "袁玉兵(P007)", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-02", "姓名": "张三", "是否施工": "是", "车辆": "防撞车"},
+        {"日期": "2025-11-02", "姓名": "李四", "是否施工": "是", "车辆": "防撞车"},
+    ]
+    payment_rows = [
+        {
+            "报销日期": "2025-11-03",
+            "报销金额": "0",
+            "报销状态": "已支付",
+            "报销类型": "工资",
+            "报销人员": "袁玉兵(P007)",
+            "上传凭证": "V200",
+        }
+    ]
+
+    output = settle_person(
+        attendance_rows,
+        payment_rows,
+        person_name="袁玉兵(P007)",
+        role="组员",
+        project_ended=True,
+        project_name="测试项目",
+        runtime_overrides={},
+    )
+
+    assert "工资：300×2=600（全组2天）" in output

@@ -9,7 +9,11 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from .attendance_pipe import AttendanceResult, compute_attendance
+from .attendance_pipe import (
+    AttendanceResult,
+    collect_name_key_conflicts,
+    compute_attendance,
+)
 from .checks import CheckResult, run_checks
 from .name_utils import name_key, normalize_name_map
 from .payment_pipe import PaymentResult, compute_payments
@@ -161,6 +165,31 @@ def _compute_pricing(
         prepay_total=prepay_total,
         payable=payable,
     )
+
+
+def _append_unique_note(notes: list[str], note: str) -> None:
+    if note not in notes:
+        notes.append(note)
+
+
+def _normalize_fixed_daily_rates(raw_rates: Mapping[str, Decimal]) -> dict[str, Decimal]:
+    normalized: dict[str, Decimal] = {}
+    for raw_key, rate in raw_rates.items():
+        normalized[name_key(str(raw_key))] = rate
+    return normalized
+
+
+def _resolve_fixed_daily_rate(
+    *,
+    raw_name: str | None,
+    fixed_daily_rates: Mapping[str, Decimal],
+) -> tuple[Decimal | None, str | None, str]:
+    resolved_key = name_key(raw_name or "")
+    if resolved_key in fixed_daily_rates:
+        return fixed_daily_rates[resolved_key], "口令", resolved_key
+    if resolved_key in NORMALIZED_DAILY_WAGE_MAP:
+        return NORMALIZED_DAILY_WAGE_MAP[resolved_key], "预置", resolved_key
+    return None, None, resolved_key
 
 
 def _render_payment_items(title: str, items: list[object]) -> list[str]:
@@ -339,6 +368,9 @@ def settle_person(
     runtime_overrides = runtime_overrides or {}
     attendance_list = list(attendance_rows)
     payment_list = list(payment_rows)
+    attendance_name_conflicts = collect_name_key_conflicts(
+        attendance_list, project_name
+    )
 
     attendance = compute_attendance(attendance_list, project_name, person_name)
     payment = compute_payments(
@@ -363,17 +395,37 @@ def settle_person(
     show_logs_in_detail = int(runtime_overrides.get("show_logs_in_detail", 1))
     audit_notes = list(runtime_overrides.get("audit_notes") or [])
     command_errors = list(runtime_overrides.get("command_errors") or [])
-    daily_group_override = runtime_overrides.get("daily_group")
-    if daily_group_override is not None:
-        daily_group = Decimal(str(daily_group_override))
-    else:
-        lookup_key = name_key(person_name or "")
-        daily_group = NORMALIZED_DAILY_WAGE_MAP.get(
-            lookup_key,
-            ROLE_WAGE_MAP.get(role or "", Decimal("0")),
+    raw_fixed_daily_rates = runtime_overrides.get("fixed_daily_rates") or {}
+    fixed_daily_rates = _normalize_fixed_daily_rates(raw_fixed_daily_rates)
+    fixed_rate_value, fixed_rate_source, resolved_key = _resolve_fixed_daily_rate(
+        raw_name=person_name,
+        fixed_daily_rates=fixed_daily_rates,
+    )
+    if fixed_rate_value is not None:
+        daily_group = fixed_rate_value
+        single_yes = fixed_rate_value
+        single_no = fixed_rate_value
+        raw_display = person_name or ""
+        _append_unique_note(
+            audit_notes,
+            "固定日薪命中："
+            f"{raw_display} -> {resolved_key} -> "
+            f"rate={_format_decimal(fixed_rate_value)}（来源：{fixed_rate_source}）",
         )
-    single_yes = Decimal(str(runtime_overrides.get("single_yes", DEFAULT_SINGLE_YES)))
-    single_no = Decimal(str(runtime_overrides.get("single_no", DEFAULT_SINGLE_NO)))
+    else:
+        daily_group_override = runtime_overrides.get("daily_group")
+        if daily_group_override is not None:
+            daily_group = Decimal(str(daily_group_override))
+        else:
+            daily_group = ROLE_WAGE_MAP.get(role or "", Decimal("0"))
+        single_yes = Decimal(
+            str(runtime_overrides.get("single_yes", DEFAULT_SINGLE_YES))
+        )
+        single_no = Decimal(str(runtime_overrides.get("single_no", DEFAULT_SINGLE_NO)))
+        _append_unique_note(
+            audit_notes,
+            f"固定日薪未命中：name_key={resolved_key}",
+        )
 
     road_cmd = runtime_overrides.get("road_cmd") or runtime_overrides.get(
         "road_passphrase"
@@ -403,6 +455,8 @@ def settle_person(
     run_id = _generate_run_id()
     log_filename = _build_log_filename(run_id, input_hash)
 
+    name_key_conflicts = list(runtime_overrides.get("name_key_conflicts") or [])
+    name_key_conflicts.extend(attendance_name_conflicts)
     context = {
         "attendance": attendance,
         "payment": payment,
@@ -417,6 +471,7 @@ def settle_person(
         "date_sets_consistent": True,
         "require_project_ended": bool(runtime_overrides.get("require_project_ended")),
         "command_errors": command_errors,
+        "name_key_conflicts": name_key_conflicts,
     }
 
     checks, hard_failures = run_checks(context)
@@ -432,7 +487,6 @@ def settle_person(
         project_pool_issue=project_pool_issue and project_name_source != "command",
         project_mismatch_blocking=project_mismatch_blocking,
     )
-    name_key_conflicts = runtime_overrides.get("name_key_conflicts") or []
     for conflict in name_key_conflicts:
         if isinstance(conflict, dict):
             key = conflict.get("name_key")

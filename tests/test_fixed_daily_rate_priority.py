@@ -1,3 +1,4 @@
+from decimal import Decimal
 from pathlib import Path
 
 from tools import demo_settle_project
@@ -103,20 +104,18 @@ def test_fixed_daily_rate_name_key_match() -> None:
         role="组员",
         project_ended=True,
         project_name="测试项目",
-        runtime_overrides={},
+        runtime_overrides={"fixed_daily_rates": {"袁玉兵": Decimal("300")}},
     )
 
     assert "工资：300×2=600（全组2天）" in output
+    assert "固定日薪命中：" in output
+    assert "来源：口令" in output
 
 
 def test_fixed_daily_rate_name_key_match_for_new_person() -> None:
     attendance_rows = [
         {"日期": "2025-11-01", "姓名": "马建(P005)", "是否施工": "是", "车辆": "防撞车"},
-        {"日期": "2025-11-01", "姓名": "张三", "是否施工": "是", "车辆": "防撞车"},
-        {"日期": "2025-11-01", "姓名": "李四", "是否施工": "是", "车辆": "防撞车"},
         {"日期": "2025-11-02", "姓名": "马建(P005)", "是否施工": "是", "车辆": "防撞车"},
-        {"日期": "2025-11-02", "姓名": "张三", "是否施工": "是", "车辆": "防撞车"},
-        {"日期": "2025-11-02", "姓名": "李四", "是否施工": "是", "车辆": "防撞车"},
     ]
     payment_rows = [
         {
@@ -136,7 +135,36 @@ def test_fixed_daily_rate_name_key_match_for_new_person() -> None:
         role="组员",
         project_ended=True,
         project_name="测试项目",
+        runtime_overrides={"fixed_daily_rates": {"马建": Decimal("300")}},
+    )
+
+    assert "单防撞工资：300×2 + 300×0=600" in output
+    assert "固定日薪命中：" in output
+
+
+def test_fixed_daily_rate_miss_audited() -> None:
+    attendance_rows = [
+        {"日期": "2025-11-01", "姓名": "张三", "是否施工": "是", "车辆": "防撞车"},
+    ]
+    payment_rows = [
+        {
+            "报销日期": "2025-11-02",
+            "报销金额": "0",
+            "报销状态": "已支付",
+            "报销类型": "工资",
+            "报销人员": "张三",
+            "上传凭证": "V202",
+        }
+    ]
+
+    output = settle_person(
+        attendance_rows,
+        payment_rows,
+        person_name="张三",
+        role="组员",
+        project_ended=True,
+        project_name="测试项目",
         runtime_overrides={},
     )
 
-    assert "工资：300×2=600（全组2天）" in output
+    assert "固定日薪未命中：" in output

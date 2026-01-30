@@ -51,6 +51,13 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     command_detail = "OK" if command_ok else "；".join(command_detail_parts)
     checks.append(_check("K", "口令信息完整", command_ok, command_detail))
 
+    name_key_conflicts = context.get("name_key_conflicts") or []
+    name_key_ok = not name_key_conflicts
+    name_key_detail = "OK"
+    if not name_key_ok:
+        name_key_detail = f"name_key 冲突 {len(name_key_conflicts)}条"
+    checks.append(_check("N", "姓名归一冲突", name_key_ok, name_key_detail))
+
     project_name = context.get("project_name")
     project_pool_issue = context.get("project_pool_issue", False)
     project_name_source = context.get("project_name_source")

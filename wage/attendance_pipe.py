@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterable, Mapping
 
+from .name_utils import name_key
 DATE_HEADERS = ["日期", "施工日期", "工作日期", "出勤日期"]
 NAME_HEADERS = [
     "姓名",
@@ -159,6 +160,16 @@ def _split_names(raw: str) -> list[str]:
             seen.add(normalized)
             deduped.append(normalized)
     return deduped
+
+
+def _split_display_names(raw: str) -> list[str]:
+    cleaned = raw.strip()
+    if not cleaned:
+        return []
+    parts = [part for part in re.split(r"[、，,;；\s]+", cleaned) if part]
+    if not parts:
+        return [cleaned]
+    return [part.strip() for part in parts if part.strip()]
 
 
 def _collect_row_names(
@@ -429,3 +440,55 @@ def collect_attendance_people(
             if normalized:
                 people.add(normalized)
     return people
+
+
+def collect_name_key_conflicts(
+    attendance_rows: Iterable[Mapping[str, str]],
+    project_name: str | None,
+) -> list[dict[str, object]]:
+    rows = list(attendance_rows)
+    headers = {key.strip() for row in rows for key in row.keys()}
+    name_header = _find_header(headers, NAME_HEADERS)
+    project_key = _find_header(headers, PROJECT_HEADERS)
+    roster_keys = [key for key in ROSTER_HEADERS if key in headers]
+    if name_header is None and not roster_keys:
+        return []
+
+    display_by_key: dict[str, dict[str, set[int]]] = {}
+    for line_no, row in enumerate(rows, start=1):
+        raw_project = row.get(project_key, "").strip() if project_key else ""
+        if project_name and raw_project and raw_project != project_name:
+            continue
+        raw_values: list[str] = []
+        if name_header:
+            raw_value = row.get(name_header, "").strip()
+            if raw_value:
+                raw_values.append(raw_value)
+        for key in roster_keys:
+            roster_value = row.get(key, "").strip()
+            if roster_value:
+                raw_values.append(roster_value)
+        for raw in raw_values:
+            for display in _split_display_names(raw):
+                normalized_key = name_key(display)
+                if not normalized_key:
+                    continue
+                entry = display_by_key.setdefault(normalized_key, {})
+                entry.setdefault(display, set()).add(line_no)
+
+    conflicts: list[dict[str, object]] = []
+    for key, display_map in display_by_key.items():
+        display_names = sorted(display_map.keys())
+        if len(display_names) <= 1:
+            continue
+        line_nos: set[int] = set()
+        for lines in display_map.values():
+            line_nos.update(lines)
+        conflicts.append(
+            {
+                "name_key": key,
+                "display_names": display_names,
+                "line_nos": sorted(line_nos),
+            }
+        )
+    return conflicts

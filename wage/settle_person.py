@@ -638,7 +638,7 @@ def settle_person(
             detail_lines.append(f"- output_hash: {OUTPUT_HASH_PLACEHOLDER}")
     if not verbose and show_audit and show_logs_in_detail:
         detail_lines.append(f"日志：logs/{log_filename}")
-    compressed_lines = ["【压缩版（发员工）】", title_line]
+    compressed_lines = ["【压缩版】", title_line]
     if group_yes_days > 0 and (single_yes_days or single_no_days):
         single_terms = []
         if single_yes_days:

@@ -440,7 +440,7 @@ def main() -> int:
             temp_command_text = _read_command_file(temp_path)
             if temp_command_text:
                 outputs.append(_run_single(temp_command_text, print_output=False))
-        marker = "【压缩版（发员工）】"
+        marker = "【压缩版】"
         detailed_parts: list[str] = []
         compact_parts: list[str] = []
         for text in outputs:
@@ -455,7 +455,7 @@ def main() -> int:
             print(detailed_part)
             if index != len(detailed_parts) - 1:
                 print()
-        print("【压缩版合集（发员工）】")
+        print("【压缩版合集】")
         for index, compact_part in enumerate(compact_parts):
             print(compact_part)
             if index != len(compact_parts) - 1:

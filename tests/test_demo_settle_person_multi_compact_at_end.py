@@ -58,16 +58,16 @@ def test_demo_settle_person_multi_compact_at_end(
 
     assert result == 0
     output = capsys.readouterr().out
-    assert output.count("【压缩版合集（发员工）】") == 1
-    assert output.count("【压缩版（发员工）】") == 2
-    marker_index = output.index("【压缩版合集（发员工）】")
+    assert output.count("【压缩版合集】") == 1
+    assert output.count("【压缩版】") == 2
+    marker_index = output.index("【压缩版合集】")
     cursor = 0
     while True:
-        found = output.find("【压缩版（发员工）】", cursor)
+        found = output.find("【压缩版】", cursor)
         if found == -1:
             break
         assert found > marker_index
         cursor = found + 1
-    compact_block = output.split("【压缩版合集（发员工）】", 1)[1]
+    compact_block = output.split("【压缩版合集】", 1)[1]
     assert "测试项目｜工资结算（王怀宇｜组长）" in compact_block
     assert "测试项目｜工资结算（李四｜组员）" in compact_block

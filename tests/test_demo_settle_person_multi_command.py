@@ -58,6 +58,6 @@ def test_demo_settle_person_multi_command(
 
     assert result == 0
     output = capsys.readouterr().out
-    assert output.count("【压缩版（发员工）】") == 2
+    assert output.count("【压缩版】") == 2
     assert output.count("测试项目｜工资结算（王怀宇｜组长）") == 2
     assert output.count("测试项目｜工资结算（李四｜组员）") == 2

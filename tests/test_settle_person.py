@@ -71,7 +71,7 @@ def test_settle_person_outputs_two_segments() -> None:
     )
 
     assert "【详细版（给杰对账）】" in output
-    assert "【压缩版（发员工）】" in output
+    assert "【压缩版】" in output
     assert f"计算口径版本 {version}｜阻断模式：Hard" in output
     assert f"- 规则版本: 计算口径版本 {version}｜阻断模式：Hard" in output
     assert "input_hash" not in output

@@ -133,3 +133,81 @@ def test_passphrase_project_auto_multiple_block() -> None:
 
     assert errors
     assert "项目清单" in errors[0]
+
+
+def test_passphrase_project_auto_payment_single() -> None:
+    attendance_rows = [{"姓名": "王怀宇"}]
+    payment_rows = [{"项目名称": "测试项目"}]
+    command_text = "\n".join(
+        [
+            "项目已结束=是",
+            "路补=无：王怀宇",
+        ]
+    )
+    lines, _, errors = expand_wage_passphrase_commands(
+        command_text,
+        attendance_rows=attendance_rows,
+        payment_rows=payment_rows,
+    )
+
+    assert not errors
+    people = _parse_people(lines)
+    assert people["王怀宇"]["project_name"] == "测试项目"
+
+
+def test_passphrase_project_auto_payment_multiple_block() -> None:
+    attendance_rows = [{"姓名": "王怀宇"}]
+    payment_rows = [{"项目": "项目A"}, {"项目": "项目B"}]
+    command_text = "\n".join(
+        [
+            "项目已结束=是",
+            "路补=无：王怀宇",
+        ]
+    )
+    _, _, errors = expand_wage_passphrase_commands(
+        command_text,
+        attendance_rows=attendance_rows,
+        payment_rows=payment_rows,
+    )
+
+    assert errors
+    assert "支付表包含多个项目" in errors[0]
+
+
+def test_passphrase_project_auto_mismatch_block() -> None:
+    attendance_rows = [{"项目": "项目A"}]
+    payment_rows = [{"项目": "项目B"}]
+    command_text = "\n".join(
+        [
+            "项目已结束=是",
+            "路补=无：王怀宇",
+        ]
+    )
+    _, _, errors = expand_wage_passphrase_commands(
+        command_text,
+        attendance_rows=attendance_rows,
+        payment_rows=payment_rows,
+    )
+
+    assert errors
+    assert "出勤表与支付表项目名不一致" in errors[0]
+
+
+def test_passphrase_project_auto_ignore_payment_multiple_when_attendance_unique() -> None:
+    attendance_rows = [{"项目": "项目A"}]
+    payment_rows = [{"项目": "项目A"}, {"项目": "项目B"}]
+    command_text = "\n".join(
+        [
+            "项目已结束=是",
+            "路补=无：王怀宇",
+        ]
+    )
+    lines, _, errors = expand_wage_passphrase_commands(
+        command_text,
+        attendance_rows=attendance_rows,
+        payment_rows=payment_rows,
+    )
+
+    assert not errors
+    people = _parse_people(lines)
+    assert people["王怀宇"]["project_name"] == "项目A"

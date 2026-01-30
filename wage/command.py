@@ -235,7 +235,7 @@ def _resolve_project_name(
     payment_counter = (
         _collect_project_counts(payment_rows) if payment_rows is not None else Counter()
     )
-    if attendance_project and len(payment_counter) >= 2:
+    if attendance_project is None and len(payment_counter) >= 2:
         errors.append(
             "支付表包含多个项目，无法自动识别项目，请补充项目=xxx"
             f"（项目清单：{_format_project_counts(payment_counter)}）"

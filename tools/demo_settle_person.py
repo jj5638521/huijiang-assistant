@@ -196,6 +196,29 @@ def _select_input_paths(
     if not candidates:
         return None
 
+    if len(candidates) == 2:
+        attendance_sorted = sorted(
+            candidates,
+            key=lambda candidate: candidate.attendance_score - candidate.payment_score,
+            reverse=True,
+        )
+        payment_sorted = sorted(
+            candidates,
+            key=lambda candidate: candidate.payment_score - candidate.attendance_score,
+            reverse=True,
+        )
+        attendance_best = attendance_sorted[0]
+        payment_best = payment_sorted[0]
+        attendance_delta = attendance_best.attendance_score - attendance_best.payment_score
+        payment_delta = payment_best.payment_score - payment_best.attendance_score
+        if (
+            attendance_delta > 0
+            and payment_delta > 0
+            and attendance_best.path != payment_best.path
+        ):
+            return attendance_best, payment_best
+        return None
+
     attendance_sorted = sorted(
         candidates,
         key=lambda candidate: candidate.attendance_score,
@@ -262,6 +285,18 @@ def _print_selection_audit(
     print("选表审计：")
     print(f"- 出勤表: {attendance.path.name}")
     print(f"- 报销表: {payment.path.name}")
+    print(
+        "- 出勤表命中: "
+        f"出勤命中 {attendance.attendance_score}, "
+        f"报销命中 {attendance.payment_score}, "
+        f"差值 {attendance.attendance_score - attendance.payment_score}"
+    )
+    print(
+        "- 报销表命中: "
+        f"出勤命中 {payment.attendance_score}, "
+        f"报销命中 {payment.payment_score}, "
+        f"差值 {payment.payment_score - payment.attendance_score}"
+    )
     attendance_headers = _summarize_headers(attendance.cleaned_headers)
     payment_headers = _summarize_headers(payment.cleaned_headers)
     print(f"- 出勤表表头(清洗): {attendance_headers}")
@@ -285,6 +320,7 @@ def _print_candidate_report(candidates: list[CsvCandidate]) -> None:
             f"- {candidate.path.name}: "
             f"出勤命中 {candidate.attendance_score}, "
             f"报销命中 {candidate.payment_score}, "
+            f"差值 {candidate.attendance_score - candidate.payment_score}, "
             f"表头: {_summarize_headers(candidate.cleaned_headers)}"
         )
 

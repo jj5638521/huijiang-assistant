@@ -120,6 +120,35 @@ def test_selects_separate_csvs(tmp_path: Path) -> None:
     assert selected[1].path == payment
 
 
+def test_selects_cross_scored_csvs(tmp_path: Path) -> None:
+    attendance = tmp_path / "attendance_any.csv"
+    payment = tmp_path / "payment_any.csv"
+    candidates = [
+        demo_settle_person.CsvCandidate(
+            path=attendance,
+            attendance_score=3,
+            payment_score=1,
+            cleaned_headers=[],
+            header_map={},
+            mtime=0.0,
+        ),
+        demo_settle_person.CsvCandidate(
+            path=payment,
+            attendance_score=1,
+            payment_score=7,
+            cleaned_headers=[],
+            header_map={},
+            mtime=0.0,
+        ),
+    ]
+
+    selected = demo_settle_person._select_input_paths(candidates)
+
+    assert selected is not None
+    assert selected[0].path == attendance
+    assert selected[1].path == payment
+
+
 def test_read_command_file_prompts(tmp_path: Path, capsys: object) -> None:
     command_path = tmp_path / "口令.txt"
 

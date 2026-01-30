@@ -178,7 +178,10 @@ def _select_input_paths(
     return attendance_best, payment_best
 
 
-def _resolve_mode(candidates: list[CsvCandidate]) -> tuple[str, str]:
+def _resolve_mode(
+    candidates: list[CsvCandidate],
+    selected: tuple[CsvCandidate, CsvCandidate] | None,
+) -> tuple[str, str]:
     names = [candidate.path.name for candidate in candidates]
     if len(candidates) == 2 and all(
         any(hint in name for hint in ONLY_MODE_HINTS) for name in names
@@ -192,6 +195,18 @@ def _resolve_mode(candidates: list[CsvCandidate]) -> tuple[str, str]:
         candidate = candidates[0]
         if candidate.attendance_score >= 2 and candidate.payment_score >= 2:
             return "C) 合并表模式", "单CSV且出勤+报销锚点同时命中"
+
+    if (
+        len(candidates) == 2
+        and selected is not None
+        and selected[0].path != selected[1].path
+    ):
+        attendance, payment = selected
+        return (
+            "分表双表（兼容表）",
+            "CSV=2 且选表审计唯一（出勤表="
+            f"{attendance.path.name}，报销表={payment.path.name}）",
+        )
 
     return "未知/需确认", "未命中 ONLY/项目池/合并表判定规则"
 
@@ -290,13 +305,13 @@ def main() -> int:
     candidates = _scan_csv_candidates(scan_dir) if scan_dir.exists() else []
     _print_csv_scan(candidates)
 
+    selected = _select_input_paths(candidates)
     print("五、运行模式判定")
-    mode, reason = _resolve_mode(candidates)
+    mode, reason = _resolve_mode(candidates, selected)
     print(f"- 模式: {mode}")
     print(f"- 依据: {reason}")
 
     print("六、选表审计")
-    selected = _select_input_paths(candidates)
     _print_selection_audit(candidates, selected)
 
     return 0

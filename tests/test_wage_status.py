@@ -45,3 +45,37 @@ def test_wage_status_only_mode(tmp_path: Path) -> None:
             shutil.rmtree(data_current)
         if backup_dir is not None:
             backup_dir.rename(data_current)
+
+
+def test_wage_status_split_compatible_mode(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    data_current = repo_root / "data" / "当前"
+    backup_dir = None
+    if data_current.exists():
+        backup_dir = tmp_path / "当前_backup"
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        data_current.rename(backup_dir)
+
+    data_current.mkdir(parents=True, exist_ok=True)
+    try:
+        attendance_csv = data_current / "00_施工表_兼容.csv"
+        payment_csv = data_current / "99_报销表_兼容.csv"
+        _write_csv(attendance_csv, ["施工日期", "是否施工", "实际出勤人员"])
+        _write_csv(payment_csv, ["报销日期", "报销人员", "报销金额", "报销类型", "报销状态"])
+
+        result = subprocess.run(
+            [sys.executable, "-m", "tools.wage_status"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert "模式: 分表双表（兼容表）" in result.stdout
+    finally:
+        if data_current.exists():
+            shutil.rmtree(data_current)
+        if backup_dir is not None:
+            backup_dir.rename(data_current)

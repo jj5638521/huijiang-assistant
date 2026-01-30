@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from wage.command import parse_command
+from wage.command import expand_wage_passphrase_commands, parse_command
 from wage.settle_person import settle_person
 
 ATTENDANCE_KEYWORDS = [
@@ -386,7 +386,24 @@ def main() -> int:
     attendance_rows = _read_csv(selected[0])
     payment_rows = _read_csv(selected[1])
 
-    lines = [line.strip() for line in command_text.splitlines() if line.strip()]
+    expanded_lines, audit_lines, errors = expand_wage_passphrase_commands(
+        command_text,
+        attendance_rows=attendance_rows,
+        payment_rows=payment_rows,
+    )
+    if errors:
+        print("【阻断｜口令解析】")
+        print("阻断原因:")
+        for error in errors:
+            print(f"- {error}")
+        return 0
+    if audit_lines:
+        print("\n".join(audit_lines))
+        print()
+    if not expanded_lines:
+        return 0
+
+    lines = [line.strip() for line in expanded_lines if line.strip()]
     wage_lines = [line for line in lines if line.startswith("工资：")]
     global_lines = [line for line in lines if not line.startswith("工资：")]
 
@@ -428,7 +445,7 @@ def main() -> int:
         return output
 
     if len(wage_lines) <= 1:
-        _run_single(command_text)
+        _run_single("\n".join(lines))
         return 0
 
     temp_path = data_dir / "当前" / "._口令_单人临时.txt"

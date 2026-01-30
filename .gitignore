@@ -42,3 +42,5 @@ data/归档
 
 # macOS junk
 data/.DS_Store
+
+.DS_Store

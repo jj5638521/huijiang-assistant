@@ -101,7 +101,7 @@ def _format_source(attendance_source: str | None, payment_source: str | None) ->
     if attendance_source and payment_source:
         if attendance_source == payment_source:
             return f"来源：{attendance_source}"
-        return f"来源：出勤/{attendance_source}｜报销/{payment_source}"
+        return f"来源：出勤={attendance_source}｜报销={payment_source}"
     if attendance_source:
         return f"来源：{attendance_source}"
     if payment_source:

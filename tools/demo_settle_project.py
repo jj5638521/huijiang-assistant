@@ -34,23 +34,17 @@ class PersonSummary:
 def _resolve_input_paths(data_dir: Path) -> tuple[Path, Path] | None:
     current_dir = data_dir / "当前"
     if not current_dir.exists():
-        print("请把本次CSV拖到 数据/当前/（文件名随意）")
+        print("请把本次CSV拖到 数据/当前/（文件名随意，可放子目录）")
         return None
     candidates = demo_settle_person._scan_csv_candidates(current_dir)
     if not candidates:
-        print("请把本次CSV拖到 数据/当前/（文件名随意）")
-        return None
-    if len(candidates) > 2:
-        demo_settle_person._report_current_dir_overflow(candidates)
+        print("请把本次CSV拖到 数据/当前/（文件名随意，可放子目录）")
         return None
     selected = demo_settle_person._select_input_paths(candidates)
     if selected is None:
-        if len(candidates) == 1:
-            print("当前目录只有 1 个 CSV，无法判定为合并表，请再放一份")
-        else:
-            demo_settle_person._print_candidate_report(candidates)
+        demo_settle_person._print_blocking_reason(candidates, data_dir.parent)
         return None
-    demo_settle_person._print_selection_audit(selected[0], selected[1])
+    demo_settle_person._print_selection_audit(selected[0], selected[1], data_dir.parent)
     return selected[0].path, selected[1].path
 
 
@@ -312,8 +306,12 @@ def main() -> int:
         runtime_overrides["project_name_source"] = "command"
     config_path = data_dir / "当前" / "配置.txt"
     runtime_overrides.update(demo_settle_person._read_runtime_overrides(config_path))
-    runtime_overrides["attendance_source"] = selected[0].name
-    runtime_overrides["payment_source"] = selected[1].name
+    runtime_overrides["attendance_source"] = demo_settle_person._format_relative_path(
+        selected[0], repo_root
+    )
+    runtime_overrides["payment_source"] = demo_settle_person._format_relative_path(
+        selected[1], repo_root
+    )
 
     output_dir = repo_root / "输出" / "当前" / str(project_name)
     output_dir.mkdir(parents=True, exist_ok=True)

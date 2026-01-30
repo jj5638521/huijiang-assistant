@@ -17,7 +17,7 @@ def test_current_dir_empty(tmp_path: Path, capsys: object) -> None:
 
     assert selected is None
     captured = capsys.readouterr()
-    assert "请把本次CSV拖到 数据/当前/（文件名随意）" in captured.out
+    assert "请把本次CSV拖到 数据/当前/（文件名随意，可放子目录）" in captured.out
 
 
 def test_current_dir_single_combined(tmp_path: Path) -> None:
@@ -43,7 +43,7 @@ def test_current_dir_single_non_combined(tmp_path: Path, capsys: object) -> None
 
     assert selected is None
     captured = capsys.readouterr()
-    assert "当前目录只有 1 个 CSV，无法判定为合并表，请再放一份" in captured.out
+    assert "缺少可识别的报销/支付表" in captured.out
 
 
 def test_current_dir_two_csvs(tmp_path: Path) -> None:
@@ -60,18 +60,23 @@ def test_current_dir_two_csvs(tmp_path: Path) -> None:
     assert selected == (attendance, payment)
 
 
-def test_current_dir_overflow(tmp_path: Path, capsys: object) -> None:
+def test_current_dir_multiple_attendance_blocks(tmp_path: Path, capsys: object) -> None:
     data_dir = tmp_path / "data"
     current_dir = data_dir / "当前"
     current_dir.mkdir(parents=True)
-    for index in range(3):
-        _write_csv(current_dir / f"file_{index}.csv", ["施工日期"])
+    attendance_a = current_dir / "施工A.csv"
+    attendance_b = current_dir / "施工B.csv"
+    payment = current_dir / "报销.csv"
+    _write_csv(attendance_a, ["施工日期", "是否施工", "施工人员"])
+    _write_csv(attendance_b, ["工作日期", "是否施工", "姓名"])
+    _write_csv(payment, ["报销日期", "报销金额", "报销状态"])
 
     selected = demo_settle_person._resolve_input_paths(data_dir)
 
     assert selected is None
     captured = capsys.readouterr()
-    assert "当前目录只保留 1(合并) 或 2(分开) 个CSV" in captured.out
+    assert "发现多份施工/出勤候选表" in captured.out
+    assert "候选清单" in captured.out
 
 
 def test_archive_ignored_when_fallback(tmp_path: Path, capsys: object) -> None:
@@ -84,7 +89,7 @@ def test_archive_ignored_when_fallback(tmp_path: Path, capsys: object) -> None:
 
     assert selected is None
     captured = capsys.readouterr()
-    assert "把 CSV 放到 data/ 目录下（文件名随意）" in captured.out
+    assert "【阻断｜选表】" in captured.out
 
 
 def test_selects_combined_csv(tmp_path: Path) -> None:
@@ -127,7 +132,9 @@ def test_selects_cross_scored_csvs(tmp_path: Path) -> None:
         demo_settle_person.CsvCandidate(
             path=attendance,
             attendance_score=3,
+            attendance_strong_hits=1,
             payment_score=1,
+            payment_strong_hits=0,
             cleaned_headers=[],
             header_map={},
             mtime=0.0,
@@ -135,7 +142,9 @@ def test_selects_cross_scored_csvs(tmp_path: Path) -> None:
         demo_settle_person.CsvCandidate(
             path=payment,
             attendance_score=1,
+            attendance_strong_hits=0,
             payment_score=7,
+            payment_strong_hits=2,
             cleaned_headers=[],
             header_map={},
             mtime=0.0,
@@ -147,6 +156,32 @@ def test_selects_cross_scored_csvs(tmp_path: Path) -> None:
     assert selected is not None
     assert selected[0].path == attendance
     assert selected[1].path == payment
+
+
+def test_recursive_current_dir_selection(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    current_dir = data_dir / "当前" / "子目录"
+    current_dir.mkdir(parents=True)
+    attendance = current_dir / "施工表_随机名.csv"
+    payment = current_dir / "报销表_随机名.csv"
+    _write_csv(attendance, ["施工日期", "是否施工", "施工人员", "项目名称"])
+    _write_csv(payment, ["报销日期", "报销金额", "报销状态", "报销类型"])
+
+    selected = demo_settle_person._resolve_input_paths(data_dir)
+
+    assert selected == (attendance, payment)
+
+
+def test_single_combined_in_subdir(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    current_dir = data_dir / "当前" / "上传"
+    current_dir.mkdir(parents=True)
+    combined = current_dir / "合并表.csv"
+    _write_csv(combined, ["施工日期", "是否施工", "报销日期", "报销金额", "报销类型"])
+
+    selected = demo_settle_person._resolve_input_paths(data_dir)
+
+    assert selected == (combined, combined)
 
 
 def test_read_command_file_prompts(tmp_path: Path, capsys: object) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping
+import re
 
 DATE_HEADERS = ["报销日期", "支付日期", "打款日期", "日期"]
 AMOUNT_HEADERS = ["报销金额", "金额", "支付金额", "实付金额"]
@@ -83,8 +84,10 @@ class PaymentResult:
     missing_amount_candidates: list[str]
     missing_type_candidates: list[str]
     project_mismatches: list[str]
+    project_candidates: list[str]
     voucher_duplicates: list[str]
     empty_voucher_duplicates: list[str]
+    normalization_logs: list[str]
 
     @property
     def paid_total(self) -> Decimal:
@@ -185,6 +188,16 @@ def _categorize(raw_type: str) -> str:
     return "其他"
 
 
+def _normalize_person_name(value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        return cleaned
+    match = re.match(r"^(.*?)\s*[\(（][^()（）]+[\)）]\s*$", cleaned)
+    if match:
+        return match.group(1).strip()
+    return cleaned
+
+
 def _summarize_text(value: str, limit: int = 20) -> str:
     text = value.strip()
     if len(text) <= limit:
@@ -244,6 +257,8 @@ def compute_payments(
     missing_amount_candidates: list[str] = []
     missing_type_candidates: list[str] = []
     project_mismatches: list[str] = []
+    project_values: set[str] = set()
+    normalization_logs: list[str] = []
     voucher_seen: set[tuple[str, str, Decimal]] = set()
     voucher_duplicates: list[str] = []
     empty_voucher_seen: set[tuple[str, str, str, Decimal, str]] = set()
@@ -259,6 +274,7 @@ def compute_payments(
     approved_result_items: list[PaymentItem] = []
     rejected_result_items: list[PaymentItem] = []
 
+    normalized_target = _normalize_person_name(target_person or "")
     for index, row in enumerate(rows, start=1):
         if _is_attendance_row(
             row,
@@ -274,7 +290,8 @@ def compute_payments(
         status_value = row.get(status_key, "").strip()
         result_value = row.get(result_key, "").strip() if result_key else ""
         type_value = row.get(type_key, "").strip()
-        name_value = row.get(name_key, "").strip()
+        raw_name_value = row.get(name_key, "").strip()
+        name_value = _normalize_person_name(raw_name_value)
         project_value = row.get(project_key, "").strip() if project_key else ""
         voucher_value = row.get(voucher_key, "").strip() if voucher_key else ""
         remark_value = row.get(remark_key, "").strip() if remark_key else ""
@@ -282,7 +299,15 @@ def compute_payments(
         if not is_payment_candidate(row):
             continue
 
-        if target_person and name_value and name_value != target_person:
+        if project_value:
+            project_values.add(project_value)
+
+        if raw_name_value and name_value != raw_name_value:
+            normalization_logs.append(
+                f"姓名规范化: '{raw_name_value}' -> '{name_value}'"
+            )
+
+        if target_person and name_value and name_value != normalized_target:
             continue
 
         if target_person and not name_value:
@@ -314,12 +339,16 @@ def compute_payments(
 
         if project_name and project_value and project_value != project_name:
             project_mismatches.append(f"{name_value}@{date_value}: {project_value}")
+            normalization_logs.append(
+                f"项目过滤: {date_value} {project_value} != {project_name}"
+            )
+            continue
 
         category = _categorize(type_value)
         item = PaymentItem(
             line_no=index,
             date=date_value,
-            name=name_value,
+            name=raw_name_value or name_value,
             project=project_value,
             amount=amount,
             category=category,
@@ -393,8 +422,10 @@ def compute_payments(
         missing_amount_candidates=missing_amount_candidates,
         missing_type_candidates=missing_type_candidates,
         project_mismatches=project_mismatches,
+        project_candidates=sorted(project_values),
         voucher_duplicates=voucher_duplicates,
         empty_voucher_duplicates=empty_voucher_duplicates,
+        normalization_logs=normalization_logs,
     )
 
 
@@ -421,7 +452,8 @@ def collect_payment_people(
             attendance_name_key,
         ):
             continue
-        name_value = row.get(name_key, "").strip()
+        raw_name_value = row.get(name_key, "").strip()
+        name_value = _normalize_person_name(raw_name_value)
         type_value = row.get(type_key, "").strip() if type_key else ""
         if not is_payment_candidate(row):
             continue

@@ -52,15 +52,16 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
     checks.append(_check("K", "口令信息完整", command_ok, command_detail))
 
     project_name = context.get("project_name")
-    project_ok = bool(project_name)
-    checks.append(
-        _check(
-            "B",
-            "项目名确定",
-            project_ok,
-            "OK" if project_ok else "未识别项目名",
-        )
-    )
+    project_pool_issue = context.get("project_pool_issue", False)
+    project_name_source = context.get("project_name_source")
+    project_requires_command = project_pool_issue and project_name_source != "command"
+    if project_requires_command:
+        project_ok = False
+        project_detail = "项目池包含多个项目，需口令指定项目=XXX"
+    else:
+        project_ok = bool(project_name) or not project_pool_issue
+        project_detail = "OK" if project_ok else "未识别项目名"
+    checks.append(_check("B", "项目名确定", project_ok, project_detail))
 
     project_ended = context.get("project_ended")
     project_ended_ok = project_ended is not None
@@ -175,17 +176,25 @@ def run_checks(context: dict) -> tuple[list[CheckResult], list[CheckResult]]:
         )
     )
 
+    project_mismatch_blocking = not (
+        project_pool_issue and project_name_source == "command"
+    )
     schema_ok = (
         not attendance.invalid_dates
-        and not attendance.project_mismatches
+        and not attendance.invalid_work_values
+        and (not attendance.project_mismatches or not project_mismatch_blocking)
         and not payment.invalid_amounts
     )
-    if payment.project_mismatches:
+    if payment.project_mismatches and project_mismatch_blocking:
         schema_ok = False
     schema_detail_parts: list[str] = []
     if attendance.invalid_dates:
         schema_detail_parts.append("日期格式异常")
-    if attendance.project_mismatches or payment.project_mismatches:
+    if attendance.invalid_work_values:
+        schema_detail_parts.append("是否施工取值异常")
+    if project_mismatch_blocking and (
+        attendance.project_mismatches or payment.project_mismatches
+    ):
         schema_detail_parts.append("项目不匹配")
     if payment.invalid_amounts:
         schema_detail_parts.append("金额格式异常")

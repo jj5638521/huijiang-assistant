@@ -47,7 +47,8 @@ def _resolve_input_paths(data_dir: Path) -> tuple[Path, Path] | None:
         else:
             demo_settle_person._print_candidate_report(candidates)
         return None
-    return selected
+    demo_settle_person._print_selection_audit(selected[0], selected[1])
+    return selected[0].path, selected[1].path
 
 
 def _parse_blocking_codes(output: str) -> list[str]:
@@ -297,10 +298,13 @@ def main() -> int:
         project_name = demo_settle_person._derive_project_name(selected[0])
         command["project_name"] = project_name
         if project_name:
+            runtime_overrides["project_name_source"] = "derived"
             demo_settle_person._append_audit_note(
                 runtime_overrides,
                 f"项目名未显式指定，已使用兜底：{project_name}",
             )
+    else:
+        runtime_overrides["project_name_source"] = "command"
     config_path = data_dir / "当前" / "配置.txt"
     runtime_overrides.update(demo_settle_person._read_runtime_overrides(config_path))
     runtime_overrides["attendance_source"] = selected[0].name

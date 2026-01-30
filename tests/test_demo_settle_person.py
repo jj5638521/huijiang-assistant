@@ -25,7 +25,7 @@ def test_current_dir_single_combined(tmp_path: Path) -> None:
     current_dir = data_dir / "当前"
     current_dir.mkdir(parents=True)
     combined = current_dir / "combined.csv"
-    _write_csv(combined, ["施工日期", "报销日期", "报销金额"])
+    _write_csv(combined, ["施工日期", "是否施工", "报销日期", "报销金额", "报销类型"])
 
     selected = demo_settle_person._resolve_input_paths(data_dir)
 
@@ -93,13 +93,15 @@ def test_selects_combined_csv(tmp_path: Path) -> None:
     combined = data_dir / "combined.csv"
     _write_csv(
         combined,
-        ["施工日期", "报销日期", "报销金额"],
+        ["施工日期", "是否施工", "报销日期", "报销金额", "报销类型"],
     )
 
     candidates = demo_settle_person._scan_csv_candidates(data_dir)
     selected = demo_settle_person._select_input_paths(candidates)
 
-    assert selected == (combined, combined)
+    assert selected is not None
+    assert selected[0].path == combined
+    assert selected[1].path == combined
 
 
 def test_selects_separate_csvs(tmp_path: Path) -> None:
@@ -113,7 +115,9 @@ def test_selects_separate_csvs(tmp_path: Path) -> None:
     candidates = demo_settle_person._scan_csv_candidates(data_dir)
     selected = demo_settle_person._select_input_paths(candidates)
 
-    assert selected == (attendance, payment)
+    assert selected is not None
+    assert selected[0].path == attendance
+    assert selected[1].path == payment
 
 
 def test_read_command_file_prompts(tmp_path: Path, capsys: object) -> None:

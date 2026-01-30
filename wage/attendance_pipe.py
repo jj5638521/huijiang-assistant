@@ -22,10 +22,15 @@ ROLE_HEADERS = ["角色", "职务", "岗位"]
 MODE_HEADERS = ["出勤模式", "出勤模式（填表用）", "配置出勤模式（引用）"]
 ROSTER_HEADERS = [
     "组长(自动)",
+    "组长（自动）",
     "设标车驾驶员(默认)",
+    "设标车驾驶员（默认）",
     "防撞车驾驶员(默认)",
+    "防撞车驾驶员（默认）",
     "辅助1(固定)",
+    "辅助1（固定）",
     "辅助2(固定)",
+    "辅助2（固定）",
 ]
 PAYMENT_ANCHOR_TOKENS = [
     "报销类型",
@@ -59,7 +64,9 @@ class AttendanceResult:
     mode_by_date: dict[str, str]
     missing_fields: list[str]
     invalid_dates: list[str]
+    invalid_work_values: list[str]
     project_mismatches: list[str]
+    project_candidates: list[str]
     conflict_logs: list[str]
     normalization_logs: list[str]
     has_vehicle_field: bool
@@ -115,9 +122,26 @@ def _normalize_role(value: str) -> str | None:
     return None
 
 
-def _is_work(value: str) -> bool:
-    text = value.strip()
-    return text in {"是", "施工", "出勤", "1", "Y", "y", "有"}
+def _normalize_work_value(value: str) -> tuple[bool | None, str | None]:
+    raw = value.strip()
+    if not raw:
+        return False, None
+    lowered = raw.lower()
+    if raw in {"是", "施工", "出勤", "有"} or lowered in {"1", "true", "y"}:
+        return True, "是"
+    if raw in {"否", "待命", "未施工"} or lowered in {"0", "false", "n"}:
+        return False, "否"
+    return None, None
+
+
+def _normalize_person_name(value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        return cleaned
+    match = re.match(r"^(.*?)\s*[\(（][^()（）]+[\)）]\s*$", cleaned)
+    if match:
+        return match.group(1).strip()
+    return cleaned
 
 
 def _split_names(raw: str) -> list[str]:
@@ -126,13 +150,14 @@ def _split_names(raw: str) -> list[str]:
         return []
     parts = [part for part in re.split(r"[、，,;；\s]+", cleaned) if part]
     if not parts:
-        return [cleaned]
+        return [_normalize_person_name(cleaned)]
     seen: set[str] = set()
     deduped: list[str] = []
     for part in parts:
-        if part not in seen:
-            seen.add(part)
-            deduped.append(part)
+        normalized = _normalize_person_name(part)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            deduped.append(normalized)
     return deduped
 
 
@@ -140,10 +165,17 @@ def _collect_row_names(
     row: Mapping[str, str],
     name_key: str | None,
     roster_keys: list[str],
+    normalization_logs: list[str],
 ) -> tuple[list[str], str]:
     primary_value = row.get(name_key, "").strip() if name_key else ""
     if primary_value:
         names = _split_names(primary_value)
+        for raw_part in re.split(r"[、，,;；\s]+", primary_value.strip()):
+            normalized = _normalize_person_name(raw_part)
+            if normalized and normalized != raw_part.strip():
+                normalization_logs.append(
+                    f"姓名规范化: '{raw_part.strip()}' -> '{normalized}'"
+                )
         return names, primary_value
     roster_values = [
         row.get(key, "").strip()
@@ -153,10 +185,15 @@ def _collect_row_names(
     names: list[str] = []
     seen: set[str] = set()
     for value in roster_values:
-        for name in _split_names(value):
-            if name not in seen:
-                seen.add(name)
-                names.append(name)
+        for raw_part in re.split(r"[、，,;；\s]+", value.strip()):
+            normalized = _normalize_person_name(raw_part)
+            if normalized and normalized != raw_part.strip():
+                normalization_logs.append(
+                    f"姓名规范化: '{raw_part.strip()}' -> '{normalized}'"
+                )
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                names.append(normalized)
     return names, ""
 
 
@@ -194,7 +231,9 @@ def compute_attendance(
         missing_fields = [item for item in missing_fields if item != "姓名"]
 
     invalid_dates: list[str] = []
+    invalid_work_values: list[str] = []
     project_mismatches: list[str] = []
+    project_values: set[str] = set()
     conflict_logs: list[str] = []
     normalization_logs: list[str] = []
     auto_corrections: list[str] = []
@@ -206,13 +245,18 @@ def compute_attendance(
     day_people_any: dict[str, set[str]] = {}
     explicit_mode_by_date: dict[str, str] = {}
 
-    for row in rows:
+    normalized_target = _normalize_person_name(target_person or "")
+    for index, row in enumerate(rows, start=1):
         if date_key is None or name_key is None or work_key is None:
             continue
         work_value = row.get(work_key, "")
         if not work_value.strip() and payment_anchor_keys:
             if any(row.get(key, "").strip() for key in payment_anchor_keys):
                 continue
+        if project_key:
+            raw_project = row.get(project_key, "").strip()
+            if raw_project:
+                project_values.add(raw_project)
         date_value = row.get(date_key, "")
         parsed_date, raw_date = _parse_date(date_value)
         if parsed_date is None:
@@ -224,7 +268,7 @@ def compute_attendance(
                 f"日期格式标准化: '{raw_date}' -> '{parsed_date}'"
             )
         name_list, primary_name_value = _collect_row_names(
-            row, name_key, roster_keys
+            row, name_key, roster_keys, normalization_logs
         )
         if not name_list:
             continue
@@ -232,7 +276,14 @@ def compute_attendance(
             normalization_logs.append(
                 f"姓名拆分: '{primary_name_value}' -> '{'、'.join(name_list)}'"
             )
-        is_work = _is_work(work_value)
+        is_work, normalized_work = _normalize_work_value(work_value)
+        if is_work is None:
+            invalid_work_values.append(f"第{index}行 是否施工='{work_value.strip()}'")
+            continue
+        if normalized_work and normalized_work != work_value.strip():
+            normalization_logs.append(
+                f"是否施工归一: '{work_value.strip()}' -> '{normalized_work}'"
+            )
         vehicle_value = row.get(vehicle_key, "").strip() if vehicle_key else ""
         role_value = row.get(role_key, "").strip() if role_key else ""
         normalized_role = _normalize_role(role_value)
@@ -246,6 +297,13 @@ def compute_attendance(
             for name in name_list:
                 fangzhuang_hits.append(f"{name}@{parsed_date}:{vehicle_value}")
         raw_project = row.get(project_key, "").strip() if project_key else ""
+        if project_name and raw_project and raw_project != project_name:
+            for name in name_list:
+                project_mismatches.append(f"{name}@{parsed_date}: {raw_project}")
+            normalization_logs.append(
+                f"项目过滤: {parsed_date} {raw_project} != {project_name}"
+            )
+            continue
         for name in name_list:
             if normalized_role:
                 existing_role = role_by_person.get(name)
@@ -259,8 +317,6 @@ def compute_attendance(
                     )
                 else:
                     role_by_person[name] = normalized_role
-            if project_name and raw_project and raw_project != project_name:
-                project_mismatches.append(f"{name}@{parsed_date}: {raw_project}")
 
             key = (name, parsed_date)
             if key in person_day_status:
@@ -311,12 +367,12 @@ def compute_attendance(
             {
                 date
                 for (name, date), _ in person_day_status.items()
-                if name == target_person
+                if name == normalized_target
             }
         )
         for date in person_dates:
             mode = mode_by_date.get(date, "全组")
-            worked = person_day_status[(target_person, date)]
+            worked = person_day_status[(normalized_target, date)]
             if mode == "单防撞":
                 if worked:
                     date_sets["单防撞｜出勤"].append(date)
@@ -336,7 +392,9 @@ def compute_attendance(
         mode_by_date=mode_by_date,
         missing_fields=missing_fields,
         invalid_dates=invalid_dates,
+        invalid_work_values=invalid_work_values,
         project_mismatches=project_mismatches,
+        project_candidates=sorted(project_values),
         conflict_logs=conflict_logs,
         normalization_logs=normalization_logs,
         has_vehicle_field=vehicle_key is not None,
@@ -360,12 +418,14 @@ def collect_attendance_people(
         return set()
     people: set[str] = set()
     for row in rows:
-        name_list, _ = _collect_row_names(row, name_key, roster_keys)
+        name_list, _ = _collect_row_names(row, name_key, roster_keys, [])
         if not name_list:
             continue
         raw_project = row.get(project_key, "").strip() if project_key else ""
         if project_name and raw_project and raw_project != project_name:
             continue
         for name in name_list:
-            people.add(name)
+            normalized = _normalize_person_name(name)
+            if normalized:
+                people.add(normalized)
     return people

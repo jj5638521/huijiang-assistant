@@ -27,6 +27,7 @@ DAILY_WAGE_MAP = {
     "董祥": Decimal("300"),
     "王怀良": Decimal("230"),
     "袁玉兵": Decimal("300"),
+    "马建": Decimal("300"),
 }
 NORMALIZED_DAILY_WAGE_MAP = normalize_name_map(DAILY_WAGE_MAP)
 ROLE_WAGE_MAP = {
@@ -436,9 +437,15 @@ def settle_person(
         if isinstance(conflict, dict):
             key = conflict.get("name_key")
             names = conflict.get("display_names") or []
+            line_nos = conflict.get("line_nos") or []
             display = ",".join(names) if isinstance(names, list) else str(names)
+            line_display = (
+                ",".join(str(item) for item in line_nos)
+                if isinstance(line_nos, list) and line_nos
+                else "-"
+            )
             invalid_items.append(
-                f"差异清单: name_key={key} 显示名={display}"
+                f"差异清单: name_key={key} 显示名={display} 行号={line_display}"
             )
     suggestions = _collect_suggestions(
         attendance,

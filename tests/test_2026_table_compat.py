@@ -82,3 +82,29 @@ def test_payment_wage_only_new_headers(tmp_path: Path) -> None:
     assert result.prepay_total == result.prepay_items[0].amount
     assert not result.paid_items
     assert not result.pending_items
+
+
+def test_attendance_roster_fallback_and_work_values(tmp_path: Path) -> None:
+    attendance_path = tmp_path / "attendance.csv"
+    _write_csv(
+        attendance_path,
+        [
+            "施工日期",
+            "项目",
+            "是否施工",
+            "实际出勤人员",
+            "组长(自动)",
+            "设标车驾驶员(默认)",
+            "辅助1(固定)",
+        ],
+        [
+            ["2026-01-10", "测试项目", "出勤", "", "张三", "李四", ""],
+            ["2026-01-11", "测试项目", "待命", "", "张三", "", ""],
+        ],
+    )
+
+    attendance_rows = _read_csv(attendance_path)
+    result = compute_attendance(attendance_rows, "测试项目", "张三")
+
+    assert "2026-01-10" in result.date_sets["单防撞｜出勤"]
+    assert "2026-01-11" in result.date_sets["全组｜未出勤"]

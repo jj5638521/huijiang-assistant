@@ -10,29 +10,40 @@ from pathlib import Path
 from wage.command import parse_command
 from wage.settle_person import settle_person
 
-ATTENDANCE_FIELDS = {
+ATTENDANCE_KEYWORDS = [
     "施工日期",
     "是否施工",
-    "今天是否施工",
-    "是否施工?",
-    "是否施工？",
-    "出勤",
-    "施工人员",
-    "实际施工人员",
+    "出勤模式",
+    "组长",
+    "驾驶员",
+    "辅助",
+    "实际出勤人数",
     "实际出勤人员",
-    "实际人员",
-    "工作日期",
-    "日期",
-}
-PAYMENT_FIELDS = {
+]
+PAYMENT_KEYWORDS = [
+    "报销类型",
+    "报销人员",
     "报销日期",
     "报销金额",
     "报销状态",
-    "报销类型",
-    "费用类型",
     "上传凭证",
-    "凭证号",
-    "项目",
+]
+
+ATTENDANCE_FIELD_CANDIDATES = {
+    "日期": ["施工日期", "日期", "工作日期", "出勤日期"],
+    "姓名": ["实际出勤人员", "施工人员", "出勤人员", "实际施工人员", "实际人员", "姓名"],
+    "项目": ["项目", "项目名称"],
+    "是否施工": ["是否施工", "今天是否施工", "是否施工?", "是否施工？"],
+    "出勤模式": ["出勤模式", "出勤模式（填表用）", "配置出勤模式（引用）"],
+}
+PAYMENT_FIELD_CANDIDATES = {
+    "日期": ["报销日期", "支付日期", "打款日期", "日期"],
+    "姓名": ["报销人员", "姓名", "收款人", "人员"],
+    "项目": ["项目", "项目名称"],
+    "类型": ["报销类型", "类型", "费用类型", "科目", "类别", "费用类别"],
+    "金额": ["报销金额", "金额", "支付金额", "实付金额"],
+    "状态": ["报销状态", "状态", "付款状态"],
+    "凭证": ["上传凭证", "凭证号", "凭证", "票据号", "流水号", "订单号"],
 }
 
 COMMON_SUFFIXES = [
@@ -55,6 +66,8 @@ class CsvCandidate:
     path: Path
     attendance_score: int
     payment_score: int
+    cleaned_headers: list[str]
+    header_map: dict[str, str]
     mtime: float
 
 
@@ -70,8 +83,47 @@ def _read_headers(path: Path) -> list[str]:
         return next(reader, [])
 
 
-def _score_headers(headers: list[str], fields: set[str]) -> int:
-    return len(set(headers) & fields)
+def _clean_header(text: str) -> str:
+    cleaned = (
+        text.replace("\ufeff", "")
+        .replace("（", "(")
+        .replace("）", ")")
+        .replace("　", " ")
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned.strip())
+    return cleaned
+
+
+def _build_header_map(headers: list[str]) -> tuple[list[str], dict[str, str]]:
+    cleaned_headers: list[str] = []
+    header_map: dict[str, str] = {}
+    for header in headers:
+        cleaned = _clean_header(header)
+        cleaned_headers.append(cleaned)
+        header_map.setdefault(cleaned, header)
+    return cleaned_headers, header_map
+
+
+def _score_headers(headers: list[str], keywords: list[str]) -> int:
+    hits: set[str] = set()
+    for header in headers:
+        for keyword in keywords:
+            if keyword in header:
+                hits.add(keyword)
+    return len(hits)
+
+
+def detect_table_role(path: Path) -> CsvCandidate:
+    headers = _read_headers(path)
+    cleaned_headers, header_map = _build_header_map(headers)
+    return CsvCandidate(
+        path=path,
+        attendance_score=_score_headers(cleaned_headers, ATTENDANCE_KEYWORDS),
+        payment_score=_score_headers(cleaned_headers, PAYMENT_KEYWORDS),
+        cleaned_headers=cleaned_headers,
+        header_map=header_map,
+        mtime=path.stat().st_mtime,
+    )
 
 
 def _scan_csv_candidates(data_dir: Path) -> list[CsvCandidate]:
@@ -79,15 +131,7 @@ def _scan_csv_candidates(data_dir: Path) -> list[CsvCandidate]:
     for path in data_dir.iterdir():
         if not path.is_file() or path.suffix.lower() != ".csv":
             continue
-        headers = _read_headers(path)
-        candidates.append(
-            CsvCandidate(
-                path=path,
-                attendance_score=_score_headers(headers, ATTENDANCE_FIELDS),
-                payment_score=_score_headers(headers, PAYMENT_FIELDS),
-                mtime=path.stat().st_mtime,
-            )
-        )
+        candidates.append(detect_table_role(path))
     return candidates
 
 
@@ -115,7 +159,8 @@ def _resolve_input_paths(data_dir: Path) -> tuple[Path, Path] | None:
             else:
                 _print_candidate_report(candidates)
             return None
-        return selected
+        _print_selection_audit(selected[0], selected[1])
+        return selected[0].path, selected[1].path
 
     attendance_path = data_dir / "attendance.csv"
     payment_path = data_dir / "payment.csv"
@@ -130,19 +175,22 @@ def _resolve_input_paths(data_dir: Path) -> tuple[Path, Path] | None:
         else:
             _print_candidate_report(candidates)
         return None
-    return selected
+    _print_selection_audit(selected[0], selected[1])
+    return selected[0].path, selected[1].path
 
 
-def _select_input_paths(candidates: list[CsvCandidate]) -> tuple[Path, Path] | None:
+def _select_input_paths(
+    candidates: list[CsvCandidate],
+) -> tuple[CsvCandidate, CsvCandidate] | None:
     combined = [
         candidate
         for candidate in candidates
-        if candidate.attendance_score > 0 and candidate.payment_score > 0
+        if candidate.attendance_score >= 2 and candidate.payment_score >= 2
     ]
     if combined:
         if len(combined) == 1:
-            path = combined[0].path
-            return path, path
+            candidate = combined[0]
+            return candidate, candidate
         return None
 
     if not candidates:
@@ -150,38 +198,84 @@ def _select_input_paths(candidates: list[CsvCandidate]) -> tuple[Path, Path] | N
 
     attendance_sorted = sorted(
         candidates,
-        key=lambda candidate: (candidate.attendance_score, candidate.mtime),
+        key=lambda candidate: candidate.attendance_score,
         reverse=True,
     )
     payment_sorted = sorted(
         candidates,
-        key=lambda candidate: (candidate.payment_score, candidate.mtime),
+        key=lambda candidate: candidate.payment_score,
         reverse=True,
     )
 
     attendance_best = attendance_sorted[0]
     payment_best = payment_sorted[0]
 
-    if attendance_best.attendance_score == 0 or payment_best.payment_score == 0:
+    if attendance_best.attendance_score < 2 or payment_best.payment_score < 2:
         return None
 
     if len(attendance_sorted) > 1:
         runner_up = attendance_sorted[1]
-        if (
-            runner_up.attendance_score == attendance_best.attendance_score
-            and runner_up.mtime == attendance_best.mtime
-        ):
+        if runner_up.attendance_score == attendance_best.attendance_score:
             return None
 
     if len(payment_sorted) > 1:
         runner_up = payment_sorted[1]
-        if (
-            runner_up.payment_score == payment_best.payment_score
-            and runner_up.mtime == payment_best.mtime
-        ):
+        if runner_up.payment_score == payment_best.payment_score:
             return None
 
-    return attendance_best.path, payment_best.path
+    return attendance_best, payment_best
+
+
+def _summarize_headers(headers: list[str], limit: int = 10) -> str:
+    if not headers:
+        return "(空表头)"
+    if len(headers) <= limit:
+        return "｜".join(headers)
+    return "｜".join(headers[:limit]) + f"...(共{len(headers)}列)"
+
+
+def _match_header(
+    cleaned_headers: list[str],
+    header_map: dict[str, str],
+    candidates: list[str],
+) -> str | None:
+    normalized_candidates = [_clean_header(item) for item in candidates]
+    for candidate in normalized_candidates:
+        for header in cleaned_headers:
+            if header == candidate or candidate in header:
+                return header_map.get(header, header)
+    return None
+
+
+def _build_field_mapping(candidate: CsvCandidate, mapping: dict[str, list[str]]) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for field, candidates in mapping.items():
+        matched = _match_header(candidate.cleaned_headers, candidate.header_map, candidates)
+        resolved[field] = matched or "未命中"
+    return resolved
+
+
+def _print_selection_audit(
+    attendance: CsvCandidate,
+    payment: CsvCandidate,
+) -> None:
+    print("选表审计：")
+    print(f"- 出勤表: {attendance.path.name}")
+    print(f"- 报销表: {payment.path.name}")
+    attendance_headers = _summarize_headers(attendance.cleaned_headers)
+    payment_headers = _summarize_headers(payment.cleaned_headers)
+    print(f"- 出勤表表头(清洗): {attendance_headers}")
+    print(f"- 报销表表头(清洗): {payment_headers}")
+    attendance_mapping = _build_field_mapping(attendance, ATTENDANCE_FIELD_CANDIDATES)
+    payment_mapping = _build_field_mapping(payment, PAYMENT_FIELD_CANDIDATES)
+    print(
+        "- 出勤表字段映射: "
+        + "，".join(f"{key}={value}" for key, value in attendance_mapping.items())
+    )
+    print(
+        "- 报销表字段映射: "
+        + "，".join(f"{key}={value}" for key, value in payment_mapping.items())
+    )
 
 
 def _print_candidate_report(candidates: list[CsvCandidate]) -> None:
@@ -190,7 +284,8 @@ def _print_candidate_report(candidates: list[CsvCandidate]) -> None:
         print(
             f"- {candidate.path.name}: "
             f"出勤命中 {candidate.attendance_score}, "
-            f"报销命中 {candidate.payment_score}"
+            f"报销命中 {candidate.payment_score}, "
+            f"表头: {_summarize_headers(candidate.cleaned_headers)}"
         )
 
 
@@ -267,10 +362,13 @@ def main() -> int:
             demo_settle_project.main()
             return ""
         runtime_overrides = dict(command.get("runtime_overrides") or {})
+        if command.get("project_name"):
+            runtime_overrides["project_name_source"] = "command"
         if not command.get("project_name"):
             derived_project = _derive_project_name(selected[0])
             command["project_name"] = derived_project
             if derived_project:
+                runtime_overrides["project_name_source"] = "derived"
                 _append_audit_note(
                     runtime_overrides,
                     f"项目名未显式指定，已使用兜底：{derived_project}",

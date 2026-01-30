@@ -236,12 +236,32 @@ def _collect_missing_items(attendance: AttendanceResult, payment: PaymentResult)
     return items
 
 
-def _collect_invalid_items(attendance: AttendanceResult, payment: PaymentResult) -> list[str]:
+def _collect_invalid_items(
+    attendance: AttendanceResult,
+    payment: PaymentResult,
+    *,
+    project_name: str | None,
+    project_pool_issue: bool,
+    project_mismatch_blocking: bool,
+) -> list[str]:
     items: list[str] = []
     if attendance.invalid_dates:
         items.append("出勤表日期格式异常")
-    if attendance.project_mismatches or payment.project_mismatches:
+    if attendance.invalid_work_values:
+        items.append(
+            "是否施工取值异常: " + "; ".join(attendance.invalid_work_values)
+        )
+    if project_mismatch_blocking and (
+        attendance.project_mismatches or payment.project_mismatches
+    ):
         items.append("项目字段不匹配")
+    if project_pool_issue and not project_name:
+        attendance_projects = "、".join(attendance.project_candidates[:10])
+        payment_projects = "、".join(payment.project_candidates[:10])
+        if attendance_projects:
+            items.append(f"出勤表项目Top10: {attendance_projects}")
+        if payment_projects:
+            items.append(f"支付表项目Top10: {payment_projects}")
     if payment.invalid_amounts:
         items.append(f"支付表金额格式异常: {'; '.join(payment.invalid_amounts)}")
     if payment.missing_type_candidates:
@@ -253,7 +273,13 @@ def _collect_invalid_items(attendance: AttendanceResult, payment: PaymentResult)
     return items
 
 
-def _collect_suggestions(attendance: AttendanceResult, payment: PaymentResult) -> list[str]:
+def _collect_suggestions(
+    attendance: AttendanceResult,
+    payment: PaymentResult,
+    *,
+    project_pool_issue: bool,
+    project_mismatch_blocking: bool,
+) -> list[str]:
     suggestions = []
     if attendance.missing_fields:
         suggestions.append("补齐出勤表字段：日期/姓名/是否施工/车辆(如有)")
@@ -261,14 +287,20 @@ def _collect_suggestions(attendance: AttendanceResult, payment: PaymentResult) -
         suggestions.append("补齐支付表字段：日期/金额/状态/类型/姓名/项目/凭证")
     if attendance.invalid_dates:
         suggestions.append("统一日期格式为 YYYY-MM-DD")
+    if attendance.invalid_work_values:
+        suggestions.append("是否施工仅允许：出勤/施工/是/1/true 或 待命/未施工/否/0/false")
     if payment.invalid_amounts:
         suggestions.append("金额请填写数字金额，可包含￥/元/逗号但勿含文字")
     if payment.missing_type_candidates:
         suggestions.append("支付行类型必填：请补‘报销类型/费用类型/科目/类别’")
     if payment.voucher_duplicates or payment.empty_voucher_duplicates:
         suggestions.append("确保凭证号唯一或补充凭证")
-    if attendance.project_mismatches or payment.project_mismatches:
+    if project_mismatch_blocking and (
+        attendance.project_mismatches or payment.project_mismatches
+    ):
         suggestions.append("确认CSV内项目字段与口令项目一致")
+    if project_pool_issue:
+        suggestions.append("项目池包含多个项目，请在口令中补充：项目=XXX")
     return suggestions
 
 
@@ -311,6 +343,13 @@ def settle_person(
         project_name,
         person_name,
         runtime_overrides.get("payment_source"),
+    )
+    project_name_source = runtime_overrides.get("project_name_source")
+    if project_name and not project_name_source:
+        project_name_source = "command"
+    project_pool_issue = (
+        (attendance.project_candidates and len(attendance.project_candidates) > 1)
+        or (payment.project_candidates and len(payment.project_candidates) > 1)
     )
 
     verbose = int(runtime_overrides.get("verbose", 0))
@@ -367,6 +406,8 @@ def settle_person(
         "person_name": person_name,
         "role": role,
         "project_name": project_name,
+        "project_name_source": project_name_source,
+        "project_pool_issue": project_pool_issue,
         "project_ended": project_ended,
         "version_note": VERSION_NOTE,
         "date_sets_consistent": True,
@@ -377,8 +418,22 @@ def settle_person(
     checks, hard_failures = run_checks(context)
 
     missing_items = _collect_missing_items(attendance, payment)
-    invalid_items = _collect_invalid_items(attendance, payment)
-    suggestions = _collect_suggestions(attendance, payment)
+    project_mismatch_blocking = not (
+        project_pool_issue and project_name_source == "command"
+    )
+    invalid_items = _collect_invalid_items(
+        attendance,
+        payment,
+        project_name=project_name,
+        project_pool_issue=project_pool_issue and project_name_source != "command",
+        project_mismatch_blocking=project_mismatch_blocking,
+    )
+    suggestions = _collect_suggestions(
+        attendance,
+        payment,
+        project_pool_issue=project_pool_issue and project_name_source != "command",
+        project_mismatch_blocking=project_mismatch_blocking,
+    )
 
     if hard_failures:
         report = render_blocking_report(
@@ -433,7 +488,11 @@ def settle_person(
         _write_log(log_filename, log_payload)
         return output_text
 
-    auto_logs = attendance.auto_corrections + attendance.normalization_logs
+    auto_logs = (
+        attendance.auto_corrections
+        + attendance.normalization_logs
+        + payment.normalization_logs
+    )
     differences = auto_logs if verbose else []
     differences_for_log = auto_logs
 
@@ -647,7 +706,9 @@ def settle_person(
             "mode_by_date": attendance.mode_by_date,
             "missing_fields": attendance.missing_fields,
             "invalid_dates": attendance.invalid_dates,
+            "invalid_work_values": attendance.invalid_work_values,
             "project_mismatches": attendance.project_mismatches,
+            "project_candidates": attendance.project_candidates,
             "conflict_logs": attendance.conflict_logs,
             "normalization_logs": attendance.normalization_logs,
             "auto_corrections": attendance.auto_corrections,
@@ -675,8 +736,10 @@ def settle_person(
             "missing_fields": payment.missing_fields,
             "invalid_amounts": payment.invalid_amounts,
             "project_mismatches": payment.project_mismatches,
+            "project_candidates": payment.project_candidates,
             "voucher_duplicates": payment.voucher_duplicates,
             "empty_voucher_duplicates": payment.empty_voucher_duplicates,
+            "normalization_logs": payment.normalization_logs,
         },
         "pricing": {
             "wage_group": _format_decimal(pricing.wage_group),

@@ -234,16 +234,16 @@ def parse_command(text: str) -> dict[str, Any]:
     runtime_overrides.
     """
     raw_lines = text.splitlines()
-    normalized_lines: list[tuple[str, str]] = []
-    for raw_line in raw_lines:
+    normalized_lines: list[tuple[int, str, str]] = []
+    for line_no, raw_line in enumerate(raw_lines, start=1):
         normalized = _normalize_line(raw_line)
         if normalized:
-            normalized_lines.append((raw_line, normalized))
-    first_line = normalized_lines[0][1] if normalized_lines else ""
+            normalized_lines.append((line_no, raw_line, normalized))
+    first_line = normalized_lines[0][2] if normalized_lines else ""
     mode = _detect_mode(first_line)
     role_overrides: dict[str, str] = {}
     fixed_daily_rates: dict[str, Decimal] = {}
-    fixed_rate_names: dict[str, set[str]] = {}
+    fixed_rate_names: dict[str, list[dict[str, object]]] = {}
     fixed_rate_conflicts: list[dict[str, object]] = []
     result: dict[str, Any] = {
         "mode": mode,
@@ -270,7 +270,7 @@ def parse_command(text: str) -> dict[str, Any]:
                     result,
                     key,
                     value,
-                    source_line=normalized_lines[0][0],
+                    source_line=normalized_lines[0][1],
                 )
     if first_line:
         for key, value in _extract_kv_pairs(first_line):
@@ -278,11 +278,11 @@ def parse_command(text: str) -> dict[str, Any]:
                 result,
                 key,
                 value,
-                source_line=normalized_lines[0][0],
+                source_line=normalized_lines[0][1],
             )
 
     block_mode: str | None = None
-    for raw_line, line in normalized_lines[1:]:
+    for line_no, raw_line, line in normalized_lines[1:]:
         if line.startswith("角色"):
             block_mode = "role"
             continue
@@ -305,25 +305,44 @@ def parse_command(text: str) -> dict[str, Any]:
             if rate is not None:
                 key = name_key(name)
                 fixed_daily_rates[key] = rate
-                fixed_rate_names.setdefault(key, set()).add(name.strip())
+                fixed_rate_names.setdefault(key, []).append(
+                    {
+                        "display_name": name.strip(),
+                        "line_no": line_no,
+                    }
+                )
             continue
         for key, value in _extract_kv_pairs(line):
             _apply_kv_mapping(result, key, value, source_line=raw_line)
 
     result.pop("_road_cmd_source", None)
-    for key, names in fixed_rate_names.items():
-        if len(names) <= 1:
+    for key, entries in fixed_rate_names.items():
+        if len(entries) <= 1:
             continue
-        display_names = sorted(names)
+        display_names = sorted(
+            {entry["display_name"] for entry in entries if entry.get("display_name")}
+        )
+        line_nos = sorted(
+            {
+                int(entry["line_no"])
+                for entry in entries
+                if isinstance(entry.get("line_no"), int)
+            }
+        )
         fixed_rate_conflicts.append(
             {
                 "name_key": key,
                 "display_names": display_names,
+                "line_nos": line_nos,
             }
         )
+        line_display = ",".join(str(item) for item in line_nos) if line_nos else "-"
         _append_command_error(
             result,
-            f"固定日薪姓名冲突: name_key={key} 显示名={','.join(display_names)}",
+            "固定日薪姓名冲突: "
+            f"name_key={key} "
+            f"显示名={','.join(display_names)} "
+            f"行号={line_display}",
         )
     if fixed_rate_conflicts:
         result["runtime_overrides"]["name_key_conflicts"] = fixed_rate_conflicts
